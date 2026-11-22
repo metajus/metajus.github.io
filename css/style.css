@@ -351,3 +351,63 @@ legend { font-size: 14px; font-weight: 600; color: #cdd6ea; padding: 0 4px; }
 .passos li { margin: 6px 0; }
 .toast { visibility: hidden; }
 .toast.visivel { visibility: visible; }
+
+/* ---------- Transição entre telas (estilo app) ---------- */
+body { overflow-x: hidden; }
+.app.vai-frente { animation: deslizaFrente .34s cubic-bezier(.2, .8, .2, 1); }
+.app.vai-tras { animation: deslizaTras .34s cubic-bezier(.2, .8, .2, 1); }
+.app.vai-frente > *, .app.vai-tras > * { animation: none; }
+@keyframes deslizaFrente { from { transform: translateX(42%); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes deslizaTras { from { transform: translateX(-42%); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ---------- Barra inferior com 6 itens ---------- */
+.nav-item { font-size: 10.5px; }
+@media (max-width: 360px) { .nav-item { font-size: 9.5px; } .nav-item .ic { width: 20px; height: 20px; } }
+
+/* ---------- Parados: fila e "sem sequencial" ---------- */
+.chip-sem { grid-column: 1 / -1; font-size: 14px; }
+.proc-fila { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #cfe0ff; margin: 2px 0 4px; }
+.proc-fila .ic { width: 15px; height: 15px; color: var(--acento); }
+
+/* ---------- Cartões de importação ---------- */
+.slots { display: flex; flex-direction: column; gap: 10px; }
+.slot { display: flex; align-items: center; gap: 12px; background: rgba(0, 0, 0, .25); border: 1px solid var(--borda); border-radius: 14px; padding: 12px; }
+.slot-num { width: 32px; height: 32px; flex: none; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #fff; background: linear-gradient(180deg, var(--acento), var(--acento-2)); }
+.slot-txt { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.slot-txt small { color: var(--suave); font-size: 12.5px; }
+.slot-txt small.ok-txt { color: #6fdca0; }
+.slot-btn { margin: 0; padding: 10px 12px; font-size: 14px; flex: none; }
+.slot-previa:empty { display: none; }
+.slot-previa .previa { margin-top: 0; }
+.previa .linha { justify-content: space-between; }
+
+/* ---------- Filas de cumprimento ---------- */
+.legenda { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--suave); margin-top: 8px; }
+.legenda i, .fila-detalhe i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.filas { margin-top: 12px; }
+.fila-card {
+  background: linear-gradient(180deg, var(--cartao-2), var(--cartao)); border: 1px solid var(--borda);
+  border-radius: 14px; padding: 13px; cursor: pointer; box-shadow: var(--sombra);
+  transition: border-color .15s, transform .12s; animation: entrar .25s ease-out both;
+}
+.fila-card:active { transform: scale(.98); }
+.fila-card.aberta { border-color: var(--acento); }
+.fila-topo { display: flex; align-items: flex-start; gap: 10px; }
+.fila-nome { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fila-nome b { color: #fff; font-size: 15px; line-height: 1.3; }
+.fila-nome small { color: var(--suave); font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fila-total { font-size: 24px; font-weight: 800; color: #fff; }
+.barra-pilha { display: flex; height: 10px; border-radius: 99px; overflow: hidden; margin-top: 10px; background: rgba(0, 0, 0, .35); }
+.barra-pilha span { display: block; height: 100%; }
+.fila-detalhe { margin-top: 12px; display: grid; gap: 6px; font-size: 14px; animation: entrar .2s ease-out both; }
+.fila-detalhe > div { display: flex; align-items: center; }
+.fila-detalhe > div b { margin-left: auto; color: #fff; }
+.fila-detalhe .btn { margin-top: 8px; }
+.resumo-filas .numeros b { font-size: 22px; }
+.ritmo .numeros .destaque { background: linear-gradient(180deg, #f4a259, #e07a2f); border-color: #f4a259; }
+.slot-btn input[type=file] { display: none !important; }
+.iad { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--borda); background: rgba(0, 0, 0, .25); }
+.iad b { font-size: 18px; }
+.iad span { font-size: 12.5px; color: var(--suave); }
+.iad.bom b { color: #6fdca0; }
+.iad.ruim b { color: #ffc46b; }
