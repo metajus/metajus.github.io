@@ -11,6 +11,7 @@
 (function () {
   const cfg = window.METAJUS_CONFIG;
   const { esc, $, $$ } = UI;
+  const ic = UI.ic;
 
   const S = {
     perfil: null, usuarios: [], processos: [], cumpridos: [], importacoes: [],
@@ -72,7 +73,7 @@
     const c = calcMeta(m);
     return `
       <div class="cartao termometro ${c.batida ? 'batida' : ''}">
-        <div class="cartao-cab"><h3>${esc(titulo)}</h3>${c.batida ? '<span class="selo ok">Meta batida</span>' : ''}</div>
+        <div class="cartao-cab"><h3>${ic('grafico')} ${esc(titulo)}</h3>${c.batida ? '<span class="selo ok">Meta batida</span>' : ''}</div>
         ${m ? `
         <div class="numeros">
           <div><b>${c.entradas}</b><small>Entradas</small></div>
@@ -109,10 +110,32 @@
     for (const p of pendentesCart) porFaixa[p.faixa] = (porFaixa[p.faixa] || 0) + 1;
     const faixasDesc = [...cfg.FAIXAS].reverse();
 
+    const hora = new Date().getHours();
+    const saud = hora < 12 ? 'Bom dia' : hora < 18 ? 'Boa tarde' : 'Boa noite';
+    const pendentesCad = S.usuarios.filter((u) => u.status === 'pendente').length;
     UI.render(`
       <section class="painel">
+        <div class="saudacao"><h2>${saud}, ${esc(S.perfil.nome.split(' ')[0])}!</h2>
+          <p>Toque num dos blocos abaixo para começar.</p></div>
+
+        ${UI.ajuda('inicio', 'Como usar o MetaJus', [
+          'Toque em <b>Processos Parados</b> para ver a sua lista de trabalho (só os seus finais).',
+          'Copie o número, cumpra no SAJ e volte para tocar em <b>✓ Cumprido</b>.',
+          'O <b>Termômetro</b> mostra quantos arquivamentos faltam para a vara fechar o mês no positivo.',
+          'Avisos do Gabinete e repasses dos colegas aparecem aqui no início. Use a barra de baixo para trocar de tela.'
+        ])}
+
+        <nav class="grade-modulos">
+          <a class="modulo" href="#/parados"><span class="mod-ic">${ic('relogio')}</span><b>Processos Parados</b><small>Sua lista por faixa de dias</small>${pendentesCart.length ? `<span class="contador">${pendentesCart.length}</span>` : ''}</a>
+          <a class="modulo" href="#/meta"><span class="mod-ic">${ic('alvo')}</span><b>Entradas e Meta</b><small>Quanto falta para o saldo positivo</small></a>
+          <a class="modulo" href="#/gabinete"><span class="mod-ic">${ic('balanca')}</span><b>Gabinete e Comandos</b><small>Conclusos e determinações</small>${av.comandos.length ? `<span class="contador">${av.comandos.length}</span>` : ''}</a>
+          <a class="modulo" href="#/repasses"><span class="mod-ic">${ic('setas')}</span><b>Repasse de Diligências</b><small>SISBAJUD, RENAJUD, ofícios…</small>${av.repasses.length ? `<span class="contador">${av.repasses.length}</span>` : ''}</a>
+          ${ehAdmin() ? `<a class="modulo admin" href="#/admin"><span class="mod-ic">${ic('cadeado')}</span><b>Administração</b><small>Aprovar colegas, planilha e QR Code</small>${pendentesCad ? `<span class="contador">${pendentesCad}</span>` : ''}</a>` : ''}
+          <a class="modulo" href="#/conta"><span class="mod-ic">${ic('pessoa')}</span><b>Minha conta</b><small>Seus dados e senha</small></a>
+        </nav>
+
         <div class="cartao meu">
-          <div class="cartao-cab"><h3>Meu painel</h3><span class="selo">Finais ${esc(UI.listaSeq(S.perfil.sequenciais))}</span></div>
+          <div class="cartao-cab"><h3>${ic('lista')} Meu painel</h3><span class="selo">Finais ${esc(UI.listaSeq(S.perfil.sequenciais))}</span></div>
           <div class="numeros">
             <div><b>${meus.length}</b><small>Sob minha resp.</small></div>
             <div><b>${pendentesCart.length}</b><small>A cumprir (Cartório)</small></div>
@@ -126,22 +149,16 @@
 
         ${(av.comandos.length || av.repasses.length) ? `
         <div class="cartao avisos">
-          <div class="cartao-cab"><h3>Avisos para você</h3></div>
+          <div class="cartao-cab"><h3>${ic('sino')} Avisos para você</h3></div>
           ${av.comandos.slice(0, 3).map((c) => `<a class="aviso" href="#/gabinete"><span class="badge urg">${esc(c.urgencia)}</span> <code>${esc(c.numero)}</code> — ${esc(c.texto)}</a>`).join('')}
           ${av.repasses.slice(0, 3).map((r) => `<a class="aviso" href="#/repasses"><span class="badge dil">${esc(r.tipo)}</span> <code>${esc(r.numero)}</code> — de ${esc(nomeUsuario(r.autor_id))}</a>`).join('')}
         </div>` : ''}
 
-        <nav class="grade-modulos">
-          <a class="modulo" href="#/parados"><span class="ic">&#9203;</span><b>Processos Parados</b><small>Por faixa e sequencial</small></a>
-          <a class="modulo" href="#/meta"><span class="ic">&#127919;</span><b>Entradas e Meta</b><small>Saldo positivo do mês</small></a>
-          <a class="modulo" href="#/gabinete"><span class="ic">&#9878;</span><b>Gabinete e Comandos</b><small>${av.comandos.length ? av.comandos.length + ' aberto(s) p/ você' : 'Conclusos e determinações'}</small></a>
-          <a class="modulo" href="#/repasses"><span class="ic">&#128257;</span><b>Repasse de Diligências</b><small>${av.repasses.length ? av.repasses.length + ' pendente(s) p/ você' : 'SISBAJUD, RENAJUD…'}</small></a>
-          ${ehAdmin() ? `<a class="modulo admin" href="#/admin"><span class="ic">&#128274;</span><b>Administração</b><small>${S.usuarios.filter((u) => u.status === 'pendente').length} cadastro(s) pendente(s)</small></a>` : ''}
-          <a class="modulo" href="#/conta"><span class="ic">&#128100;</span><b>Minha conta</b><small>Perfil e senha</small></a>
-        </nav>
 
+        ${UI.blocoInstalar()}
         <p class="dica centro">${imp.length ? `Base atualizada em ${UI.dataHora(imp[0].criado_em)} · ${imp[0].total} processos parados ${comparacao ? '· ' + comparacao : ''}` : 'A base de processos ainda não foi importada.'}</p>
       </section>`);
+    UI.atualizarInstalar();
   }
 
   // ======================= 1. PROCESSOS PARADOS =======================
@@ -159,14 +176,20 @@
 
     UI.render(`
       <section>
+        ${UI.ajuda('parados', 'Como usar esta tela', [
+          'Escolha <b>onde</b> o processo está: Cartório, Gabinete ou Sem local.',
+          'Toque numa <b>faixa de dias</b>. Quanto mais vermelha, mais tempo parado — comece por ela.',
+          'Seus <b>finais</b> já vêm marcados em azul. Toque num número para incluir ou tirar.',
+          'Toque em <b>Copiar</b>, cumpra no SAJ e depois em <b>✓ Cumprido</b>. Precisa de outro colega? Use <b>Repassar</b>.'
+        ])}
         <div class="cartao filtros">
           <div class="abas" id="abasLocal">
             ${['Cartório', 'Gabinete', ''].map((l) => `<button class="aba${estadoParados.local === l ? ' on' : ''}" data-local="${l}">${l || 'Sem local'}</button>`).join('')}
           </div>
-          <div class="rotulo">Faixa de dias parados</div>
+          <div class="rotulo"><b>1</b> · Onde está ↑ &nbsp; <b>2</b> · Faixa de dias parados</div>
           <div class="faixas" id="faixas"></div>
           <label class="check"><input type="checkbox" id="eAcima"${estadoParados.eAcima ? ' checked' : ''}> incluir faixas acima da escolhida</label>
-          <div class="rotulo">Sequenciais</div>
+          <div class="rotulo"><b>3</b> · Sequenciais (finais)</div>
           ${UI.chipsSeq(estadoParados.seqs, 'pSeq')}
           <div class="linha">
             <input type="search" id="pBusca" placeholder="Buscar número…" value="${esc(estadoParados.busca)}" inputmode="numeric">
@@ -240,12 +263,12 @@
           ${p.local ? `<span>${esc(p.local)}</span>` : ''}
           ${c ? `<span class="ok-txt">&#10003; ${esc(nomeUsuario(c.usuario_id))} · ${UI.dataHora(c.cumprido_em)}</span>` : ''}
         </div>
-        ${semAcoes ? `<div class="proc-acoes"><button class="btn mini" data-acao="copiar">Copiar</button></div>` : `
+        ${semAcoes ? `<div class="proc-acoes"><button class="btn mini" data-acao="copiar">${ic('copiar')} Copiar</button></div>` : `
         <div class="proc-acoes">
-          <button class="btn mini" data-acao="copiar">Copiar</button>
+          <button class="btn mini" data-acao="copiar">${ic('copiar')} Copiar</button>
           ${c ? (meu || ehAdmin() ? '<button class="btn mini" data-acao="desfazer">Desfazer</button>' : '')
-              : '<button class="btn mini ok" data-acao="cumprir">&#10003; Cumprido</button>'}
-          <button class="btn mini" data-acao="repassar">Repassar</button>
+              : `<button class="btn mini ok" data-acao="cumprir">${ic('check')} Cumprido</button>`}
+          <button class="btn mini" data-acao="repassar">${ic('setas')} Repassar</button>
         </div>`}
       </div>`;
   }
@@ -262,7 +285,10 @@
       if (ac === 'desfazer') await DB.desmarcarCumprido(n);
       await carregar('cumpridos');
       if ($('#pLista')) desenharParados();
-      if (ac === 'cumprir') UI.toast('Marcado como cumprido.', 'ok');
+      if (ac === 'cumprir') {
+        UI.toast('Marcado como cumprido. Bom trabalho!', 'ok');
+        const el = $(`.proc[data-n="${CSS.escape(n)}"]`); if (el) el.classList.add('pulso');
+      }
     });
     if ($('#gLista')) desenharConclusos();
   }
@@ -277,8 +303,14 @@
 
     UI.render(`
       <section>
+        ${UI.ajuda('meta', 'Como funciona a meta', [
+          'A meta do mês é sempre <b>Entradas + 1</b>: arquivar pelo menos um processo a mais do que entrou.',
+          '<b>Faltam</b> mostra quantos arquivamentos ainda são necessários.',
+          'Quando a barra ficar <b>verde</b>, a meta do mês foi batida.',
+          ehAdmin() ? 'Administrador: lance os números no formulário abaixo ou importe a planilha de movimentação.' : 'Os números são lançados pelo administrador.'
+        ])}
         <div class="cartao">
-          <label>Mês<input type="month" id="mMes" value="${mes}" max="${mesAtual()}"></label>
+          <label>Escolha o mês<input type="month" id="mMes" value="${mes}" max="${mesAtual()}"></label>
         </div>
         ${cartaoTermometro(m, nomeMes(mes))}
         <div class="cartao">
@@ -341,14 +373,20 @@
 
     UI.render(`
       <section>
+        ${UI.ajuda('gabinete', 'Como usar o Gabinete', [
+          'Toque numa <b>faixa de dias</b> para ver os processos conclusos há mais tempo.',
+          'Em <b>Comandos</b> ficam as determinações abertas, das mais urgentes (Réu Preso, Medida Protetiva) para as demais.',
+          'Quem cumprir toca em <b>✓ Cumprido</b> — todos veem que foi feito.',
+          'Gabinete e Híbrido: registre novos comandos no formulário no fim da tela.'
+        ])}
         <div class="cartao">
-          <div class="cartao-cab"><h3>Conclusos no Gabinete</h3><span class="selo">${S.processos.filter((p) => p.local === 'Gabinete').length} no total</span></div>
+          <div class="cartao-cab"><h3>${ic('balanca')} Conclusos no Gabinete</h3><span class="selo">${S.processos.filter((p) => p.local === 'Gabinete').length} no total</span></div>
           <div class="faixas" id="gFaixas"></div>
           <div id="gLista" class="lista"></div>
         </div>
 
         <div class="cartao">
-          <div class="cartao-cab"><h3>Comandos</h3></div>
+          <div class="cartao-cab"><h3>${ic('lista')} Comandos</h3></div>
           <div class="abas" id="gAbas">
             ${[['aberto', 'Abertos'], ['cumprido', 'Cumpridos'], ['todos', 'Todos']].map(([v, t]) =>
               `<button class="aba${estadoGab.filtroCmd === v ? ' on' : ''}" data-v="${v}">${t}</button>`).join('')}
@@ -358,7 +396,7 @@
 
         ${podeGabinete() ? `
         <form class="cartao" id="fCmd">
-          <h3>Novo comando</h3>
+          <h3>${ic('enviar')} Novo comando</h3>
           <label>Nº do processo<input id="gNum" required placeholder="0000000-00.0000.8.02.0034" value="${esc(n)}"></label>
           <div class="linha2">
             <label>Urgência<select id="gUrg">${cfg.URGENCIAS.map((u) => `<option>${esc(u)}</option>`).join('')}</select></label>
@@ -434,7 +472,7 @@
           ${c.status === 'cumprido' ? ` · <span class="ok-txt">&#10003; cumprido por ${esc(nomeUsuario(c.concluido_por))} em ${UI.dataHora(c.concluido_em)}</span>` : ''}</div>
         <div class="proc-acoes">
           <button class="btn mini" data-acao="copiar">Copiar nº</button>
-          ${c.status === 'aberto' ? '<button class="btn mini ok" data-acao="concluir">&#10003; Cumprido</button>' : '<button class="btn mini" data-acao="reabrir">Reabrir</button>'}
+          ${c.status === 'aberto' ? `<button class="btn mini ok" data-acao="concluir">${ic('check')} Cumprido</button>` : '<button class="btn mini" data-acao="reabrir">Reabrir</button>'}
           ${(c.autor_id === S.perfil.id || ehAdmin()) ? '<button class="btn mini perigo" data-acao="excluir">Excluir</button>' : ''}
         </div>
       </div>`).join('') : '<div class="vazio">Nenhum comando aqui.</div>';
@@ -470,8 +508,13 @@
 
     UI.render(`
       <section>
+        ${UI.ajuda('repasses', 'Como repassar uma diligência', [
+          'Digite o <b>número do processo</b> e escolha a diligência (ex.: SISBAJUD).',
+          'Escolha o <b>colega habilitado</b> e toque em <b>Enviar repasse</b>.',
+          'Quem recebe vê em <b>Para mim</b> e marca <b>Cumprido</b> ou <b>Devolve</b> com o motivo.'
+        ])}
         <form class="cartao" id="fRep">
-          <h3>Novo repasse</h3>
+          <h3>${ic('setas')} Novo repasse</h3>
           <label>Nº do processo<input id="rNum" required value="${esc(n)}" placeholder="0000000-00.0000.8.02.0034"></label>
           <div class="linha2">
             <label>Diligência<select id="rTipo">${cfg.DILIGENCIAS.map((d) => `<option>${esc(d)}</option>`).join('')}</select></label>
@@ -525,7 +568,7 @@
         <div class="dica">De ${esc(nomeUsuario(r.autor_id))} para ${esc(nomeUsuario(r.destinatario_id))} · ${UI.dataHora(r.criado_em)}</div>
         <div class="proc-acoes">
           <button class="btn mini" data-acao="copiar">Copiar nº</button>
-          ${r.status === 'pendente' && r.destinatario_id === eu ? '<button class="btn mini ok" data-acao="cumprido">&#10003; Cumprido</button><button class="btn mini" data-acao="devolver">Devolver</button>' : ''}
+          ${r.status === 'pendente' && r.destinatario_id === eu ? `<button class="btn mini ok" data-acao="cumprido">${ic('check')} Cumprido</button><button class="btn mini" data-acao="devolver">Devolver</button>` : ''}
           ${r.status !== 'pendente' && (r.destinatario_id === eu || ehAdmin()) ? '<button class="btn mini" data-acao="reabrir">Reabrir</button>' : ''}
           ${(r.autor_id === eu || ehAdmin()) ? '<button class="btn mini perigo" data-acao="excluir">Excluir</button>' : ''}
         </div>
@@ -565,13 +608,18 @@
 
     UI.render(`
       <section>
+        ${UI.ajuda('admin', 'O que fazer aqui', [
+          'Confira os <b>cadastros pendentes</b>: ajuste setor e sequenciais e toque em <b>Aprovar</b>.',
+          'Em <b>Atualizar base</b>, envie a planilha do SAJ Insights. Confira o resumo antes de confirmar.',
+          'Mostre ou imprima o <b>QR Code</b> para os colegas instalarem o app.'
+        ])}
         <div class="cartao">
-          <div class="cartao-cab"><h3>Cadastros pendentes</h3><span class="selo ${pend.length ? 'alerta' : ''}">${pend.length}</span></div>
+          <div class="cartao-cab"><h3>${ic('pessoa')} Cadastros pendentes</h3><span class="selo ${pend.length ? 'alerta' : ''}">${pend.length}</span></div>
           ${pend.length ? pend.map((u) => editorUsuario(u)).join('') : '<p class="dica">Nenhum cadastro aguardando.</p>'}
         </div>
 
         <div class="cartao">
-          <h3>Atualizar base (planilha do SAJ Insights)</h3>
+          <h3>${ic('enviar')} Atualizar base (planilha do SAJ Insights)</h3>
           <p class="dica">Envie o relatório de processos parados como veio do SAJ (.xlsx/.csv). O app lê só as colunas <b>Faixa de Dias, Processo, Cartório/Gabinete e Sequencial</b> e ignora o resto. O arquivo é lido aqui no aparelho; só esses 4 campos vão para o banco.</p>
           <label class="arquivo">Escolher planilha<input type="file" id="aArquivo" accept=".xlsx,.xls,.csv"></label>
           <div id="aPrevia"></div>
@@ -580,12 +628,12 @@
         </div>
 
         <div class="cartao">
-          <div class="cartao-cab"><h3>Equipe</h3><span class="selo">${equipe.length}</span></div>
+          <div class="cartao-cab"><h3>${ic('lista')} Equipe</h3><span class="selo">${equipe.length}</span></div>
           ${equipe.map((u) => editorUsuario(u)).join('') || '<p class="dica">Ninguém ainda.</p>'}
         </div>
 
         <div class="cartao centro" id="cartaoQR">
-          <h3>QR Code de acesso</h3>
+          <h3 class="centro">${ic('qr')} QR Code de acesso</h3>
           <p class="dica">O colega aponta a câmera, abre o link, toca em "Adicionar à tela inicial" e faz o cadastro. O acesso só é liberado após sua aprovação.</p>
           <div id="qr" class="qr"></div>
           <code class="url">${esc(url)}</code>
@@ -684,7 +732,7 @@
         <div class="rotulo">Sequenciais</div>
         ${UI.chipsSeq(u.sequenciais, 'seq-' + u.id)}
         <div class="proc-acoes">
-          ${u.status === 'pendente' ? `<button class="btn mini ok" data-uacao="aprovar">Aprovar</button><button class="btn mini perigo" data-uacao="recusar">Recusar</button>`
+          ${u.status === 'pendente' ? `<button class="btn mini ok" data-uacao="aprovar">${ic('check')} Aprovar</button><button class="btn mini perigo" data-uacao="recusar">Recusar</button>`
             : `<button class="btn mini" data-uacao="salvar">Salvar alterações</button>
                ${eu ? '' : (u.status === 'bloqueado' ? '<button class="btn mini ok" data-uacao="desbloquear">Desbloquear</button>' : '<button class="btn mini perigo" data-uacao="bloquear">Bloquear</button>')}`}
         </div>
@@ -732,11 +780,11 @@
           <p class="dica">Para mudar setor ou sequenciais, peça ao administrador.</p>
         </div>
         <form class="cartao" id="fSenha">
-          <h3>Trocar senha</h3>
+          <h3>${ic('cadeado')} Trocar senha</h3>
           <label>Nova senha<input type="password" id="cNova" minlength="6" required autocomplete="new-password"></label>
           <button class="btn secundario" type="submit">Salvar nova senha</button>
         </form>
-        <button class="btn perigo largo" id="cSair">Sair do aplicativo</button>
+        <button class="btn perigo largo" id="cSair">${ic('sair')} Sair do aplicativo</button>
         <p class="dica centro">MetaJus · ${DB.modo === 'demo' ? 'modo demonstração' : 'conectado ao banco'}</p>
       </section>`);
     $('#fSenha').addEventListener('submit', (e) => {
@@ -782,6 +830,7 @@
       estadoRep.aba = 'para';
     }
 
+    UI.nav(['/', '/parados', '/meta', '/gabinete', '/repasses'].includes(rota) ? rota : '');
     const telas = {
       '/': telaInicio, '/parados': telaParados, '/meta': telaMeta, '/gabinete': telaGabinete,
       '/repasses': telaRepasses, '/admin': telaAdmin, '/conta': telaConta

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1f3a68">
+  <meta name="theme-color" content="#06080d">
   <meta name="description" content="MetaJus — gestão de cumprimentos e metas da Comarca de Santa Luzia do Norte">
   <meta name="robots" content="noindex, nofollow">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,12 +17,13 @@
 </head>
 <body>
   <header id="topo" class="topo oculto">
-    <button id="btnVoltar" class="topo-btn oculto" aria-label="Voltar">&#8592;</button>
+    <button id="btnVoltar" class="topo-btn oculto" aria-label="Voltar"></button>
+    <img id="topoLogo" class="topo-logo" src="icons/icon-192.png" alt="">
     <div class="topo-titulo">
       <strong id="topoTitulo">MetaJus</strong>
       <small id="topoSub"></small>
     </div>
-    <button id="btnSair" class="topo-btn" aria-label="Sair" title="Sair">&#x23FB;</button>
+    <button id="btnSair" class="topo-btn" aria-label="Sair" title="Sair"></button>
   </header>
 
   <div id="faixaDemo" class="faixa-demo oculto">
@@ -32,6 +33,14 @@
   <main id="app" class="app">
     <div class="carregando">Carregando…</div>
   </main>
+
+  <nav id="navBaixo" class="nav-baixo oculto" aria-label="Navegação principal">
+    <a class="nav-item" data-rota="/" href="#/"><span class="ic" data-ic="casa"></span>Início</a>
+    <a class="nav-item" data-rota="/parados" href="#/parados"><span class="ic" data-ic="relogio"></span>Parados</a>
+    <a class="nav-item" data-rota="/meta" href="#/meta"><span class="ic" data-ic="alvo"></span>Meta</a>
+    <a class="nav-item" data-rota="/gabinete" href="#/gabinete"><span class="ic" data-ic="balanca"></span>Gabinete</a>
+    <a class="nav-item" data-rota="/repasses" href="#/repasses"><span class="ic" data-ic="setas"></span>Repasses</a>
+  </nav>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
