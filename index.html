@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f3a68">
+  <meta name="description" content="MetaJus — gestão de cumprimentos e metas da Comarca de Santa Luzia do Norte">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MetaJus">
+  <title>MetaJus</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="topo" class="topo oculto">
+    <button id="btnVoltar" class="topo-btn oculto" aria-label="Voltar">&#8592;</button>
+    <div class="topo-titulo">
+      <strong id="topoTitulo">MetaJus</strong>
+      <small id="topoSub"></small>
+    </div>
+    <button id="btnSair" class="topo-btn" aria-label="Sair" title="Sair">&#x23FB;</button>
+  </header>
+
+  <div id="faixaDemo" class="faixa-demo oculto">
+    Modo demonstração — os dados ficam só neste aparelho. Configure o Supabase em <code>js/config.js</code> para uso real.
+  </div>
+
+  <main id="app" class="app">
+    <div class="carregando">Carregando…</div>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- Bibliotecas (CDN, versões fixas) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+
+  <!-- App -->
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
