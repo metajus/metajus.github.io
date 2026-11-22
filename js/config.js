@@ -15,6 +15,9 @@ window.METAJUS_CONFIG = {
   SUPABASE_URL: 'https://tfwchbdtqpzyaohwvbdk.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_riODtbq4isv1sxXfqKdbxQ_4RkFIt7c',
 
+  // Endereço oficial do app (usado no QR Code e no "Copiar link")
+  APP_URL: 'https://metajus.github.io/',
+
   NOME_UNIDADE: 'Comarca de Santa Luzia do Norte',
 
   // Faixas de dias parados exibidas no app

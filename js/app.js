@@ -604,7 +604,8 @@
     await carregar('usuarios', 'importacoes');
     const pend = S.usuarios.filter((u) => u.status === 'pendente');
     const equipe = S.usuarios.filter((u) => u.status !== 'pendente');
-    const url = location.origin + location.pathname;
+    // Sempre o endereço oficial (se o app for aberto pelo arquivo do PC, o QR não aponta para o computador)
+    const url = cfg.APP_URL || (location.origin + location.pathname);
 
     UI.render(`
       <section>
@@ -656,7 +657,7 @@
     // QR Code
     try {
       const qr = qrcode(0, 'M'); qr.addData(url); qr.make();
-      $('#qr').innerHTML = qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+      $('#qr').innerHTML = qr.createSvgTag({ cellSize: 6, margin: 24, scalable: true });
     } catch (_) { $('#qr').textContent = 'Biblioteca de QR Code não carregou.'; }
     $('#aCopiarUrl').addEventListener('click', () => UI.copiar(url));
     $('#aImprimir').addEventListener('click', () => { document.body.classList.add('imprimindo-qr'); window.print(); setTimeout(() => document.body.classList.remove('imprimindo-qr'), 500); });
