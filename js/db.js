@@ -113,6 +113,9 @@
         await this.salvarMeta(mes, e, a);
       },
 
+      async listarMetas() {
+        return ok(await sb.from('metas_mensais').select('*').order('mes'));
+      },
       async ultimaFila() {
         return ok(await sb.from('filas_snapshots').select('*').order('criado_em', { ascending: false }).limit(1).maybeSingle());
       },
@@ -252,6 +255,7 @@
         const atual = st.metas[mes] || { entradas: 0, arquivados: 0 };
         await this.salvarMeta(mes, campo === 'entradas' ? valor : atual.entradas, campo === 'arquivados' ? valor : atual.arquivados);
       },
+      async listarMetas() { exigeAprovado(); return Object.values(st.metas).map(copia).sort((a, b) => a.mes.localeCompare(b.mes)); },
       async ultimaFila() { exigeAprovado(); return st.filas ? copia(st.filas) : null; },
       async salvarFilas(itens, total, referencia) {
         const u = exigeAdmin();

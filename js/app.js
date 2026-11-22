@@ -70,22 +70,50 @@
     const pct = meta ? Math.min(100, Math.round((arquivados / meta) * 100)) : 0;
     return { entradas, arquivados, meta, falta, pct, batida: arquivados >= meta && !!m };
   }
-  function cartaoTermometro(m, titulo) {
+  // Dias úteis (seg–sex) do mês inteiro; feriados não são descontados
+  function diasUteisNoMes(mes) {
+    const [a, m] = mes.split('-').map(Number);
+    let n = 0;
+    for (let d = new Date(a, m - 1, 1); d.getMonth() === m - 1; d.setDate(d.getDate() + 1)) { const w = d.getDay(); if (w && w !== 6) n++; }
+    return n;
+  }
+  // Projeção para o fim do mês no ritmo atual (só para o mês corrente)
+  function projecao(m, mes) {
+    if (!m || mes !== mesAtual()) return null;
+    const total = diasUteisNoMes(mes), restantes = diasUteisRestantes(mes);
+    const hojeUtil = [1, 2, 3, 4, 5].includes(new Date().getDay()) ? 1 : 0;
+    const decorridos = Math.max(1, total - restantes + hojeUtil);
+    return {
+      baixados: Math.round(m.arquivados / decorridos * total),
+      novos: Math.round(m.entradas / decorridos * total),
+      decorridos, total, restantes
+    };
+  }
+  const v2 = (x) => x.toFixed(2).replace('.', ',');
+
+  function cartaoTermometro(m, titulo, mes, comLink) {
+    mes = mes || mesAtual();
     const c = calcMeta(m);
+    const p = projecao(m, mes);
+    const saldo = c.arquivados - c.entradas;
     return `
       <div class="cartao termometro ${c.batida ? 'batida' : ''}">
-        <div class="cartao-cab"><h3>${ic('grafico')} ${esc(titulo)}</h3>${c.batida ? '<span class="selo ok">Meta batida</span>' : ''}</div>
+        <div class="cartao-cab"><h3>${ic('grafico')} ${esc(titulo)}</h3>
+          ${m ? `<span class="selo ${c.batida ? 'ok' : 'alerta'}">${c.batida ? '&#10003; Meta batida' : '&#9888; Em andamento'}</span>` : ''}</div>
         ${m ? `
-        <div class="numeros">
-          <div><b>${c.entradas}</b><small>Casos novos</small></div>
-          <div><b>${c.arquivados}</b><small>Baixados</small></div>
-          <div><b>${c.meta}</b><small>Meta (novos+1)</small></div>
-          <div class="destaque"><b>${c.falta}</b><small>Faltam</small></div>
+        <div class="kpis">
+          <div class="kpi"><small><i class="sw" style="background:${c.batida ? Graficos.COR.bom : Graficos.COR.s1}"></i>Baixados</small><b>${Graficos.fmt(c.arquivados)}</b></div>
+          <div class="kpi"><small>Novos</small><b>${Graficos.fmt(c.entradas)}</b></div>
+          <div class="kpi"><small>Saldo</small><b class="${saldo >= 0 ? 'ok-txt' : 'alerta-txt'}">${saldo > 0 ? '+' : ''}${saldo}</b></div>
+          <div class="kpi"><small>IAD</small><b class="${c.entradas && c.arquivados / c.entradas >= 1 ? 'ok-txt' : 'alerta-txt'}">${c.entradas ? v2(c.arquivados / c.entradas) : '—'}</b></div>
         </div>
-        <div class="barra"><div style="width:${c.pct}%"></div></div>
-        <p class="dica">${c.batida ? `Meta batida: ${c.arquivados - c.entradas} baixa(s) a mais do que entrou.` : `Faltam ${c.falta} baixa(s) para fechar o mês com saldo positivo.`}</p>
-        ${c.entradas ? `<div class="iad ${c.arquivados / c.entradas >= 1 ? 'bom' : 'ruim'}"><b>IAD ${(c.arquivados / c.entradas).toFixed(2).replace('.', ',')}</b>
-          <span>Índice de Atendimento à Demanda = baixados ÷ casos novos. Acima de 1,00 a comarca baixa mais do que recebe.</span></div>` : ''}`
+        ${Graficos.bullet({ valor: c.arquivados, meta: c.meta, projecao: p && p.baixados, rotuloMeta: 'Meta' })}
+        ${Graficos.legenda([{ rotulo: 'Baixados', cor: c.batida ? Graficos.COR.bom : Graficos.COR.s1 }, { rotulo: 'Meta (casos novos + 1)', cor: '#fff' }].concat(p ? [{ rotulo: 'Projeção do mês', cor: 'rgba(57,135,229,.35)' }] : []))}
+        <p class="resumo-meta">${c.batida
+          ? `A comarca já baixou <b>${saldo}</b> processo(s) a mais do que recebeu.`
+          : `Faltam <b>${c.falta}</b> baixa(s) para fechar o mês com saldo positivo.`}
+          ${p ? ` No ritmo atual o mês fecha com cerca de <b>${p.baixados}</b> baixados para <b>${p.novos}</b> casos novos (saldo <b>${p.baixados - p.novos >= 0 ? '+' : ''}${p.baixados - p.novos}</b>).` : ''}</p>
+        ${comLink ? '<a class="btn secundario largo" href="#/meta">' + ic('grafico') + ' Ver todos os indicadores</a>' : ''}`
         : '<p class="dica">Números do mês ainda não lançados pelo administrador.</p>'}
       </div>`;
   }
@@ -131,7 +159,7 @@
         <nav class="grade-modulos">
           <a class="modulo" href="#/parados"><span class="mod-ic">${ic('relogio')}</span><b>Processos Parados</b><small>Sua lista por faixa de dias</small>${pendentesCart.length ? `<span class="contador">${pendentesCart.length}</span>` : ''}</a>
           <a class="modulo" href="#/filas"><span class="mod-ic">${ic('lista')}</span><b>Filas de Cumprimento</b><small>Onde os processos estão parados no SAJ</small></a>
-          <a class="modulo" href="#/meta"><span class="mod-ic">${ic('alvo')}</span><b>Entradas e Meta</b><small>Quanto falta para o saldo positivo</small></a>
+          <a class="modulo" href="#/meta"><span class="mod-ic">${ic('grafico')}</span><b>Painel e Meta</b><small>Gráficos da meta, evolução e acervo</small></a>
           <a class="modulo" href="#/gabinete"><span class="mod-ic">${ic('balanca')}</span><b>Gabinete e Comandos</b><small>Conclusos e determinações</small>${av.comandos.length ? `<span class="contador">${av.comandos.length}</span>` : ''}</a>
           <a class="modulo" href="#/repasses"><span class="mod-ic">${ic('setas')}</span><b>Repasse de Diligências</b><small>SISBAJUD, RENAJUD, ofícios…</small>${av.repasses.length ? `<span class="contador">${av.repasses.length}</span>` : ''}</a>
           ${ehAdmin() ? `<a class="modulo admin" href="#/admin"><span class="mod-ic">${ic('cadeado')}</span><b>Administração</b><small>Aprovar colegas, planilha e QR Code</small>${pendentesCad ? `<span class="contador">${pendentesCad}</span>` : ''}</a>` : ''}
@@ -149,7 +177,7 @@
             `<a class="badge ${classeFaixa(f)}" href="#/parados?faixa=${f}">${rotuloFaixa(f)}: ${porFaixa[f]}</a>`).join('')}</div>` : ''}
         </div>
 
-        ${cartaoTermometro(S.meta, 'Termômetro de ' + nomeMes(mesAtual()))}
+        ${cartaoTermometro(S.meta, 'Meta de ' + nomeMes(mesAtual()), mesAtual(), true)}
 
         ${(av.comandos.length || av.repasses.length) ? `
         <div class="cartao avisos">
@@ -163,6 +191,7 @@
         <p class="dica centro">${imp.length ? `Base atualizada em ${UI.dataHora(imp[0].criado_em)} · ${imp[0].total} processos parados ${comparacao ? '· ' + comparacao : ''}` : 'A base de processos ainda não foi importada.'}</p>
       </section>`);
     UI.atualizarInstalar();
+    animarNumeros($('#app'));
   }
 
   // ======================= 1. PROCESSOS PARADOS =======================
@@ -333,39 +362,128 @@
     return n;
   }
 
+  const MES_CURTO = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const mesCurto = (m) => { const [a, mm] = m.split('-'); return MES_CURTO[+mm - 1] + '/' + a.slice(2); };
+  const estadoPainel = { aba: 'meta' };
+  // Tons ordinais (azul) para as faixas de parados: mais escuro = mais antigo
+  const TOM_FAIXA = { 30: '#86b6ef', 60: '#5598e7', 100: '#3987e5', 120: '#2a78d6', 180: '#256abf', 365: '#184f95' };
+
   async function telaMeta() {
-    UI.topo('Entradas e Meta do Mês', 'Meta = Entradas + 1', true);
+    UI.topo('Painel de Indicadores', 'Meta, evolução e acervo', true);
     const q = consultaHash();
     const mes = q.get('mes') || mesAtual();
-    UI.render('<div class="carregando">Carregando…</div>');
-    const m = await DB.obterMeta(mes);
+    if (q.get('aba')) estadoPainel.aba = q.get('aba');
+    UI.render(`<section>${'<div class="cartao esqueleto"></div>'.repeat(3)}</section>`);
+    const [m, metas] = await Promise.all([DB.obterMeta(mes), DB.listarMetas().catch(() => []), S.processos.length ? null : carregar('processos'), S.filas ? null : carregar('filas').catch(() => null)]);
     const c = calcMeta(m);
     const dias = diasUteisRestantes(mes);
     const porDia = dias ? Math.ceil(c.falta / dias) : c.falta;
+    const G = Graficos, COR = G.COR;
 
-    UI.render(`
-      <section>
-        ${UI.ajuda('meta2', 'Como funciona a meta', [
-          'A meta do mês é sempre <b>Casos novos + 1</b>: a comarca precisa baixar pelo menos um processo a mais do que entrou.',
-          '<b>Faltam</b> mostra quantas baixas ainda são necessárias; o <b>ritmo</b> divide isso pelos dias úteis que restam.',
-          'Quando a barra ficar <b>verde</b>, a meta do mês foi batida.',
-          ehAdmin() ? 'Administrador: importe a planilha <b>IAD</b> do SAJ Insights logo abaixo (ou digite os números).' : 'Os números vêm das planilhas do SAJ Insights importadas pelo administrador.'
-        ])}
-        <div class="cartao">
-          <label>Escolha o mês<input type="month" id="mMes" value="${mes}" max="${mesAtual()}"></label>
+    // ---------- Aba 1: Meta do mês ----------
+    const abaMeta = `
+        <div class="cartao seletor-mes">
+          <button class="btn-icone" id="mAnt" aria-label="Mês anterior">&#8249;</button>
+          <label><span>${esc(nomeMes(mes).replace(/^./, (l) => l.toUpperCase()))}</span><input type="month" id="mMes" value="${mes}" max="${mesAtual()}"></label>
+          <button class="btn-icone" id="mProx" aria-label="Próximo mês" ${mes >= mesAtual() ? 'disabled' : ''}>&#8250;</button>
         </div>
-        ${cartaoTermometro(m, nomeMes(mes))}
+        ${cartaoTermometro(m, 'Meta de baixados', mes)}
         ${m && !c.batida && mes === mesAtual() ? `
         <div class="cartao ritmo">
           <h3>${ic('relogio')} Ritmo necessário</h3>
-          <div class="numeros">
-            <div><b>${c.falta}</b><small>Baixas que faltam</small></div>
-            <div><b>${dias}</b><small>Dias úteis restantes</small></div>
-            <div class="destaque"><b>${porDia}</b><small>Baixas por dia útil</small></div>
+          <div class="kpis">
+            <div class="kpi"><small>Faltam</small><b>${c.falta}</b></div>
+            <div class="kpi"><small>Dias úteis</small><b>${dias}</b></div>
+            <div class="kpi destaque"><small>Baixas/dia</small><b>${porDia}</b></div>
           </div>
-          <p class="dica">Sem contar feriados. Cada baixa conta: arquivamento definitivo, extinção, remessa etc., conforme o relatório de Baixados.</p>
+          <p class="dica">Para bater a meta, a comarca precisa de <b>${porDia}</b> baixa(s) por dia útil até o fim do mês (feriados não descontados).</p>
         </div>` : ''}
-        ${m ? `<p class="dica centro">Atualizado em ${UI.dataHora(m.atualizado_em)}</p>` : ''}
+        ${m ? `<p class="dica centro">Atualizado em ${UI.dataHora(m.atualizado_em)}</p>` : ''}`;
+
+    // ---------- Aba 2: Evolução ----------
+    const hist = metas.filter((x) => x.mes <= mesAtual()).slice(-6);
+    const abaEvolucao = hist.length ? `
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('grafico')} Baixados × Casos novos</h3><span class="selo">${hist.length} ${hist.length > 1 ? 'meses' : 'mês'}</span></div>
+          <p class="dica">Quando a barra <b style="color:${COR.s1}">azul</b> passa a <b style="color:${COR.s2}">laranja</b>, a comarca baixou mais do que recebeu.</p>
+          ${G.colunasAgrupadas(hist.map((x) => mesCurto(x.mes)), [
+            { nome: 'Baixados', cor: COR.s1, valores: hist.map((x) => x.arquivados) },
+            { nome: 'Casos novos', cor: COR.s2, valores: hist.map((x) => x.entradas) }])}
+          ${G.legenda([{ rotulo: 'Baixados', cor: COR.s1 }, { rotulo: 'Casos novos', cor: COR.s2 }])}
+        </div>
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('alvo')} IAD por mês</h3></div>
+          <p class="dica">IAD = baixados ÷ casos novos. Pontos <b class="ok-txt">verdes</b> estão acima de 1,00 (meta atendida); <b class="alerta-txt">vermelhos</b>, abaixo.</p>
+          ${G.linha(hist.map((x) => mesCurto(x.mes)), hist.map((x) => x.entradas ? x.arquivados / x.entradas : 0))}
+        </div>
+        <details class="cartao tabela-dados"><summary>${ic('lista')} Ver em tabela</summary>
+          <table><thead><tr><th>Mês</th><th>Novos</th><th>Baixados</th><th>Saldo</th><th>IAD</th></tr></thead><tbody>
+          ${hist.slice().reverse().map((x) => { const sd = x.arquivados - x.entradas; return `<tr><td>${mesCurto(x.mes)}</td><td>${x.entradas}</td><td>${x.arquivados}</td><td class="${sd >= 0 ? 'ok-txt' : 'alerta-txt'}">${sd > 0 ? '+' : ''}${sd}</td><td>${x.entradas ? v2(x.arquivados / x.entradas) : '—'}</td></tr>`; }).join('')}
+          </tbody></table></details>`
+      : `<div class="vazio">${ic('grafico')}<p>Ainda não há meses lançados para mostrar a evolução.</p></div>`;
+
+    // ---------- Aba 3: Acervo ----------
+    const P = S.processos;
+    let abaAcervo;
+    if (!P.length) abaAcervo = `<div class="vazio">${ic('ampulheta')}<p>O acervo de processos parados ainda não foi importado.</p></div>`;
+    else {
+      const porFaixa = cfg.FAIXAS.map((f) => ({ rotulo: '+' + f + ' dias', valor: P.filter((p) => p.faixa === f).length, cor: TOM_FAIXA[f] || COR.s1 }));
+      const mais100 = P.filter((p) => p.faixa >= 100).length;
+      const semSeq = P.filter((p) => p.sequencial == null).length;
+      const loc = { 'Cartório': 0, 'Gabinete': 0, '': 0 };
+      P.forEach((p) => { loc[p.local in loc ? p.local : ''] += 1; });
+      const seqs = Array.from({ length: 10 }, (_, k) => ({ rotulo: String(k), valor: P.filter((p) => p.sequencial === k).length }));
+      const fl = S.filas && S.filas.itens ? S.filas.itens : [];
+      const porFila = {};
+      fl.forEach((it) => { porFila[it.fila] = (porFila[it.fila] || 0) + it.qtd; });
+      const topFilas = Object.entries(porFila).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([f, v]) => ({ rotulo: f, valor: v }));
+      abaAcervo = `
+        <div class="cartao">
+          <div class="kpis">
+            <div class="kpi"><small>Parados</small><b>${G.fmt(P.length)}</b></div>
+            <div class="kpi"><small>+100 dias</small><b class="alerta-txt">${G.fmt(mais100)}</b></div>
+            <div class="kpi"><small>% antigos</small><b>${Math.round(mais100 / P.length * 100)}%</b></div>
+            <div class="kpi"><small>Sem seq.</small><b>${G.fmt(semSeq)}</b></div>
+          </div>
+        </div>
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('ampulheta')} Tempo sem movimentação</h3></div>
+          <p class="dica">Quanto mais escura a barra, mais antigo o processo. Toque numa faixa em <b>Parados</b> para ver a lista.</p>
+          ${G.barrasH(porFaixa, { larguraRotulo: 80 })}
+        </div>
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('balanca')} Onde estão</h3></div>
+          ${G.pilha100([{ rotulo: 'Cartório', valor: loc['Cartório'], cor: COR.s1 }, { rotulo: 'Gabinete', valor: loc['Gabinete'], cor: COR.s2 }, { rotulo: 'Sem local', valor: loc[''], cor: COR.neutro }])}
+          <div class="g-partes">
+            <div><i style="background:${COR.s1}"></i>Cartório<b>${G.fmt(loc['Cartório'])}</b></div>
+            <div><i style="background:${COR.s2}"></i>Gabinete<b>${G.fmt(loc['Gabinete'])}</b></div>
+            <div><i style="background:${COR.neutro}"></i>Sem local<b>${G.fmt(loc[''])}</b></div>
+          </div>
+        </div>
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('pessoa')} Por sequencial (final do número)</h3></div>
+          <p class="dica">Mostra a carga de cada final. ${semSeq ? `<b>${G.fmt(semSeq)}</b> processo(s) vieram do SAJ sem sequencial.` : ''}</p>
+          ${G.colunas(seqs.map((x) => (S.perfil.sequenciais || []).includes(+x.rotulo) ? { ...x, cor: COR.s3, tip: `Final ${x.rotulo} (seu): ${G.fmt(x.valor)}` } : { ...x, tip: `Final ${x.rotulo}: ${G.fmt(x.valor)}` }))}
+          ${(S.perfil.sequenciais || []).length ? G.legenda([{ rotulo: 'Outros finais', cor: COR.s1 }, { rotulo: 'Seus finais', cor: COR.s3 }]) : ''}
+        </div>
+        ${topFilas.length ? `
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('lista')} Maiores filas de cumprimento</h3><a class="selo" href="#/filas">ver todas</a></div>
+          ${G.barrasH(topFilas, { larguraRotulo: 150 })}
+        </div>` : ''}`;
+    }
+
+    const ABAS = [['meta', 'Meta do mês'], ['evolucao', 'Evolução'], ['acervo', 'Acervo']];
+    UI.render(`
+      <section>
+        ${UI.ajuda('painel', 'Como usar o painel', [
+          '<b>Meta do mês</b>: a meta é sempre <b>Casos novos + 1</b>. A linha branca é a meta; a barra azul, o que já foi baixado; a faixa clara, a projeção até o fim do mês.',
+          '<b>Evolução</b>: compara os meses e mostra o IAD (acima de 1,00 = comarca em dia).',
+          '<b>Acervo</b>: processos parados por tempo, local, sequencial e as maiores filas.',
+          'Toque ou passe o dedo sobre qualquer barra para ver o número exato.'
+        ])}
+        <div class="segmentado" id="pAbas">${ABAS.map(([k, t]) => `<button data-a="${k}" class="${estadoPainel.aba === k ? 'on' : ''}">${t}</button>`).join('')}<span class="seg-ind"></span></div>
+        <div id="pCorpo" class="painel-corpo"></div>
         ${ehAdmin() ? `
         <div class="cartao">
           <h3>${ic('enviar')} Importar do SAJ Insights</h3>
@@ -385,7 +503,37 @@
         </form>` : ''}
       </section>`);
 
-    $('#mMes').addEventListener('change', (e) => { if (e.target.value) location.hash = '#/meta?mes=' + e.target.value; });
+    const corpos = { meta: abaMeta, evolucao: abaEvolucao, acervo: abaAcervo };
+    function mostrarAba(k, animar) {
+      const de = ABAS.findIndex((a) => a[0] === estadoPainel.aba), para = ABAS.findIndex((a) => a[0] === k);
+      estadoPainel.aba = k;
+      const corpo = $('#pCorpo');
+      corpo.innerHTML = corpos[k];
+      $$('#pAbas button').forEach((b, n) => b.classList.toggle('on', n === para));
+      $('#pAbas').style.setProperty('--seg', para);
+      if (animar) { corpo.classList.remove('entra-dir', 'entra-esq'); void corpo.offsetWidth; corpo.classList.add(para >= de ? 'entra-dir' : 'entra-esq'); }
+      animarNumeros(corpo);
+      if (k === 'meta') ligarMes();
+    }
+    function ligarMes() {
+      const ir = (mm) => { location.hash = '#/meta?aba=meta&mes=' + mm; };
+      const desloca = (n) => { const [a, mm] = mes.split('-').map(Number); const d = new Date(a, mm - 1 + n, 1); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+      $('#mMes').addEventListener('change', (e) => { if (e.target.value) ir(e.target.value); });
+      $('#mAnt').addEventListener('click', () => ir(desloca(-1)));
+      $('#mProx').addEventListener('click', () => { if (mes < mesAtual()) ir(desloca(1)); });
+    }
+    $('#pAbas').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && b.dataset.a !== estadoPainel.aba) mostrarAba(b.dataset.a, true); });
+    // deslizar o dedo para trocar de aba
+    let x0 = null;
+    $('#pCorpo').addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+    $('#pCorpo').addEventListener('touchend', (e) => {
+      if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) < 70) return;
+      const n = ABAS.findIndex((a) => a[0] === estadoPainel.aba) + (dx < 0 ? 1 : -1);
+      if (ABAS[n]) mostrarAba(ABAS[n][0], true);
+    });
+    mostrarAba(estadoPainel.aba, false);
+
     if (ehAdmin()) {
       $('#fMeta').addEventListener('submit', (e) => {
         e.preventDefault();
@@ -397,6 +545,24 @@
       });
       ligarSlots(() => telaMeta());
     }
+  }
+
+  // Números "contando" de 0 até o valor (dá sensação de painel vivo)
+  function animarNumeros(raiz) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    raiz.querySelectorAll('.kpi b').forEach((b) => {
+      const txt = b.textContent.trim();
+      const m = txt.match(/^([+]?)([\d.]+)(%?)$/);
+      if (!m) return;
+      const alvo = parseInt(m[2].replace(/\./g, ''), 10); if (!alvo) return;
+      const t0 = performance.now(), dur = 700;
+      const passo = (t) => {
+        const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+        b.textContent = m[1] + Math.round(alvo * e).toLocaleString('pt-BR') + m[3];
+        if (k < 1) requestAnimationFrame(passo);
+      };
+      requestAnimationFrame(passo);
+    });
   }
 
   // ======================= FILAS DE CUMPRIMENTO =======================
