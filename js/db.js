@@ -74,7 +74,7 @@
         const passo = 1000;
         for (;;) {
           const pg = ok(await sb.from('processos')
-            .select('numero,faixa,faixa_texto,local,sequencial')
+            .select('numero,faixa,faixa_texto,local,sequencial,fila,fluxo,ultima_mov')
             .order('faixa', { ascending: false }).order('numero')
             .range(de, de + passo - 1));
           todos = todos.concat(pg);
@@ -104,6 +104,20 @@
         ok(await sb.from('metas_mensais').upsert({
           mes, entradas, arquivados, atualizado_em: new Date().toISOString(), atualizado_por: s && s.userId
         }));
+      },
+      // Atualiza só um dos campos (ex.: importou só os Baixados)
+      async salvarMetaCampo(mes, campo, valor) {
+        const atual = await this.obterMeta(mes);
+        const e = campo === 'entradas' ? valor : (atual ? atual.entradas : 0);
+        const a = campo === 'arquivados' ? valor : (atual ? atual.arquivados : 0);
+        await this.salvarMeta(mes, e, a);
+      },
+
+      async ultimaFila() {
+        return ok(await sb.from('filas_snapshots').select('*').order('criado_em', { ascending: false }).limit(1).maybeSingle());
+      },
+      async salvarFilas(itens, total, referencia) {
+        ok(await sb.from('filas_snapshots').insert({ itens, total, referencia }));
       },
 
       async listarComandos() {
@@ -232,6 +246,16 @@
       async salvarMeta(mes, entradas, arquivados) {
         const u = exigeAdmin();
         st.metas[mes] = { mes, entradas, arquivados, atualizado_em: agora(), atualizado_por: u.id }; salvar();
+      },
+
+      async salvarMetaCampo(mes, campo, valor) {
+        const atual = st.metas[mes] || { entradas: 0, arquivados: 0 };
+        await this.salvarMeta(mes, campo === 'entradas' ? valor : atual.entradas, campo === 'arquivados' ? valor : atual.arquivados);
+      },
+      async ultimaFila() { exigeAprovado(); return st.filas ? copia(st.filas) : null; },
+      async salvarFilas(itens, total, referencia) {
+        const u = exigeAdmin();
+        st.filas = { id: st.seq++, criado_em: agora(), itens, total, referencia, usuario_id: u.id }; salvar();
       },
 
       async listarComandos() { exigeAprovado(); return copia(st.comandos).sort((a, b) => b.criado_em.localeCompare(a.criado_em)); },

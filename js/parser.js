@@ -51,8 +51,11 @@
     const local = acharCol(cab, (c) => c.includes('cartorio') || c.includes('gabinete') || c.includes('localiza'));
     const sequencial = acharCol(cab, (c) => c.includes('sequencial') || c === 'seq' || c === 'seq.');
     const segredo = acharCol(cab, (c) => c.includes('segredo') || c.includes('sigilo'));
+    const fila = acharCol(cab, (c) => c.startsWith('fila'));
+    const fluxo = acharCol(cab, (c) => c.startsWith('fluxo'));
+    const ultMov = acharCol(cab, (c) => c.includes('data') && c.includes('moviment'));
     if (faixa < 0 && dias < 0 && sequencial < 0) return null;
-    return { processo, faixa, dias, local, sequencial, segredo };
+    return { processo, faixa, dias, local, sequencial, segredo, fila, fluxo, ultMov };
   }
 
   function faixaDeTexto(txt) {
@@ -72,8 +75,25 @@
   }
   const verdadeiro = (v) => ['sim', 's', 'x', 'true', '1', 'verdadeiro'].includes(norm(v));
 
+  // Data (Date do Excel ou texto dd/mm/aaaa) -> 'AAAA-MM-DD'
+  function dataISO(v) {
+    if (v instanceof Date && !isNaN(v)) {
+      return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+    }
+    const m = String(v || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    return m ? m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0') : null;
+  }
+  const txt = (v) => (v == null ? '' : String(v)).trim();
+  // Competência a partir do fluxo do SAJ
+  function area(fluxo) {
+    const f = norm(fluxo);
+    if (f.startsWith('civel')) return 'Cível';
+    if (f.startsWith('criminal') || f.includes('garantias')) return 'Criminal';
+    return 'Outros';
+  }
+
   async function lerParados(file) {
-    const abas = await lerArquivo(file);
+    const abas = await lerArquivo(file, true);
     for (const aba of abas) {
       const cab = acharCabecalho(aba.linhas, mapaParados);
       if (!cab) continue;
@@ -89,11 +109,11 @@
         const l = aba.linhas[i] || [];
         // Relatórios agrupados repetem a faixa só na 1ª linha do bloco: herda a anterior
         let faixa = null, faixaTexto = '';
-        if (m.faixa >= 0 && String(l[m.faixa]).trim() !== '') {
-          faixaTexto = String(l[m.faixa]).trim();
+        if (m.faixa >= 0 && txt(l[m.faixa]) !== '') {
+          faixaTexto = txt(l[m.faixa]);
           faixa = faixaDeTexto(faixaTexto);
           if (faixa != null) { ultimaFaixa = faixa; ultimaFaixaTexto = faixaTexto; }
-        } else if (m.dias >= 0 && String(l[m.dias]).trim() !== '') {
+        } else if (m.dias >= 0 && txt(l[m.dias]) !== '') {
           const n = faixaDeTexto(l[m.dias]);
           if (n != null) { faixa = faixaDeDias(n); faixaTexto = n + ' dias'; }
         } else if (ultimaFaixa != null) {
@@ -105,14 +125,17 @@
         if (!achou) { if (bruto.trim()) resumo.ignoradosInvalidos++; continue; }
         if (m.segredo >= 0 && verdadeiro(l[m.segredo])) { resumo.ignoradosSegredo++; continue; }
 
-        const seqTxt = m.sequencial >= 0 ? String(l[m.sequencial]).trim() : '';
+        const seqTxt = m.sequencial >= 0 ? txt(l[m.sequencial]) : '';
         const sequencial = /^\d$/.test(seqTxt) ? parseInt(seqTxt, 10) : null;
         const item = {
           numero: achou[0],
           faixa: faixa == null ? 0 : faixa,
           faixa_texto: faixaTexto,
           local: m.local >= 0 ? normLocal(l[m.local]) : '',
-          sequencial
+          sequencial,
+          fila: m.fila >= 0 ? txt(l[m.fila]).slice(0, 120) || null : null,
+          fluxo: m.fluxo >= 0 ? txt(l[m.fluxo]).slice(0, 120) || null : null,
+          ultima_mov: m.ultMov >= 0 ? dataISO(l[m.ultMov]) : null
         };
         const ant = mapa.get(item.numero);
         if (!ant || item.faixa > ant.faixa) mapa.set(item.numero, item);
@@ -125,9 +148,141 @@
         resumo.porLocal[p.local] = (resumo.porLocal[p.local] || 0) + 1;
       }
       resumo.semSequencial = itens.filter((p) => p.sequencial == null).length;
+      resumo.comFila = itens.filter((p) => p.fila).length;
+      resumo.referencia = referenciaDe(aba.linhas);
       if (itens.length) return { itens, resumo };
     }
     throw new Error('Não encontrei as colunas "Processo" e "Faixa de Dias"/"Sequencial" em nenhuma aba da planilha.');
+  }
+
+  // "Filtros aplicados: ... Mês/Ano é 11/2026" -> '2026-11'
+  function referenciaDe(linhas) {
+    for (const l of linhas) for (const c of (l || [])) {
+      const m = String(c || '').match(/m[eê]s\/ano\s+[eé]\s+(\d{1,2})\/(\d{4})/i);
+      if (m) return m[2] + '-' + m[1].padStart(2, '0');
+    }
+    return null;
+  }
+
+  // --------------------------------------------------------
+  // Filas de cumprimento (Fluxo e Fila)
+  //   Fluxo | Fila | Faixa de Dias | Processos no Fluxo no Fim do Período
+  //   Só números agregados — nenhum número de processo.
+  // --------------------------------------------------------
+  function mapaFilas(cab) {
+    const fluxo = acharCol(cab, (c) => c.startsWith('fluxo'));
+    const fila = acharCol(cab, (c) => c.startsWith('fila'));
+    const faixa = acharCol(cab, (c) => c.includes('faixa'));
+    const qtd = acharCol(cab, (c) => c.includes('processos no fluxo') || c.includes('quantidade') || c === 'qtd' || c === 'total');
+    if (fila < 0 || qtd < 0) return null;
+    return { fluxo, fila, faixa, qtd };
+  }
+  async function lerFilas(file) {
+    const abas = await lerArquivo(file, true);
+    for (const aba of abas) {
+      const cab = acharCabecalho(aba.linhas, mapaFilas);
+      if (!cab) continue;
+      const m = cab.mapa;
+      const agrup = new Map();
+      for (let i = cab.indice + 1; i < aba.linhas.length; i++) {
+        const l = aba.linhas[i] || [];
+        const fila = txt(l[m.fila]);
+        const qtd = parseInt(String(l[m.qtd]).replace(/\D/g, ''), 10);
+        if (!fila || isNaN(qtd)) continue;
+        const fluxo = m.fluxo >= 0 ? txt(l[m.fluxo]) : '';
+        const faixa = m.faixa >= 0 ? txt(l[m.faixa]) : '';
+        const k = fluxo + '|' + fila + '|' + faixa;
+        agrup.set(k, (agrup.get(k) || 0) + qtd);
+      }
+      const itens = [...agrup.entries()].map(([k, qtd]) => {
+        const [fluxo, fila, faixa] = k.split('|');
+        return { fluxo, area: area(fluxo), fila, faixa, qtd };
+      });
+      if (itens.length) {
+        return { itens, total: itens.reduce((a, b) => a + b.qtd, 0), referencia: referenciaDe(aba.linhas), aba: aba.nome };
+      }
+    }
+    throw new Error('Não encontrei as colunas "Fila" e "Processos no Fluxo" nesta planilha.');
+  }
+
+  // --------------------------------------------------------
+  // Lista de processos do mês (Baixados ou Entradas/Distribuídos)
+  //   n | Mês/Ano | Processo | ...  -> quantidade por mês
+  // --------------------------------------------------------
+  function mapaListaMes(cab) {
+    const processo = cab.findIndex((c) => c === 'processo' || c.startsWith('processo'));
+    const mes = acharCol(cab, (c) => c.replace(/\s/g, '') === 'mes/ano' || c.startsWith('mes'));
+    const data = acharCol(cab, (c) => c.startsWith('data'));
+    if (processo < 0 || (mes < 0 && data < 0)) return null;
+    if (acharCol(cab, (c) => c.includes('faixa')) >= 0) return null; // é o relatório de parados
+    return { processo, mes, data };
+  }
+  async function lerListaMes(file) {
+    const abas = await lerArquivo(file, true);
+    for (const aba of abas) {
+      const cab = acharCabecalho(aba.linhas, mapaListaMes);
+      if (!cab) continue;
+      const m = cab.mapa;
+      const porMes = {};
+      for (let i = cab.indice + 1; i < aba.linhas.length; i++) {
+        const l = aba.linhas[i] || [];
+        const achou = txt(l[m.processo]).match(RE_CNJ);
+        if (!achou) continue;
+        let mes = null;
+        if (m.mes >= 0) { const x = txt(l[m.mes]).match(/(\d{1,2})\/(\d{4})/); if (x) mes = x[2] + '-' + x[1].padStart(2, '0'); }
+        if (!mes && m.data >= 0) { const d = dataISO(l[m.data]); if (d) mes = d.slice(0, 7); }
+        if (!mes) continue;
+        (porMes[mes] = porMes[mes] || new Set()).add(achou[0]);
+      }
+      const meses = Object.fromEntries(Object.entries(porMes).map(([k, v]) => [k, v.size]));
+      if (Object.keys(meses).length) return { meses, referencia: referenciaDe(aba.linhas), aba: aba.nome };
+    }
+    throw new Error('Não encontrei as colunas "Processo" e "Mês/Ano" nesta planilha.');
+  }
+
+  // --------------------------------------------------------
+  // IAD, Casos Novos e Baixados (resumo por classe/assunto)
+  //   Mês/Ano | IAD | Casos Novos | Baixados | ...  -> soma por mês
+  // --------------------------------------------------------
+  function mapaIAD(cab) {
+    const mes = acharCol(cab, (c) => c.replace(/\s/g, '') === 'mes/ano');
+    const novos = acharCol(cab, (c) => c.startsWith('casos novos'));
+    const baixados = acharCol(cab, (c) => c.startsWith('baixados'));
+    if (mes < 0 || novos < 0 || baixados < 0) return null;
+    return { mes, novos, baixados };
+  }
+  async function lerIAD(file) {
+    const abas = await lerArquivo(file, true);
+    for (const aba of abas) {
+      const cab = acharCabecalho(aba.linhas, mapaIAD);
+      if (!cab) continue;
+      const m = cab.mapa;
+      const meses = {};
+      const num = (v) => { const n = Number(String(v).replace(',', '.')); return isNaN(n) ? 0 : n; };
+      for (let i = cab.indice + 1; i < aba.linhas.length; i++) {
+        const l = aba.linhas[i] || [];
+        const x = txt(l[m.mes]).match(/^(\d{1,2})\/(\d{4})$/);
+        if (!x) continue;
+        const k = x[2] + '-' + x[1].padStart(2, '0');
+        meses[k] = meses[k] || { entradas: 0, arquivados: 0 };
+        meses[k].entradas += num(l[m.novos]);
+        meses[k].arquivados += num(l[m.baixados]);
+      }
+      if (Object.keys(meses).length) return { meses, referencia: referenciaDe(aba.linhas), aba: aba.nome };
+    }
+    throw new Error('Não encontrei as colunas "Mês/Ano", "Casos Novos" e "Baixados" nesta planilha.');
+  }
+
+  // Descobre qual relatório é, pelo cabeçalho
+  async function identificar(file) {
+    const abas = await lerArquivo(file, true);
+    for (const aba of abas) {
+      if (acharCabecalho(aba.linhas, mapaIAD)) return 'iad';
+      if (acharCabecalho(aba.linhas, mapaFilas)) return 'filas';
+      if (acharCabecalho(aba.linhas, mapaParados)) return 'parados';
+      if (acharCabecalho(aba.linhas, mapaListaMes)) return 'lista';
+    }
+    return null;
   }
 
   // --------------------------------------------------------
@@ -179,5 +334,5 @@
     throw new Error('Não encontrei as colunas "Data" e "Tipo" (Entrada/Arquivamento) na planilha.');
   }
 
-  window.Parser = { lerParados, lerMovimentacao, RE_CNJ, faixaDeDias };
+  window.Parser = { lerParados, lerMovimentacao, lerFilas, lerListaMes, lerIAD, identificar, area, RE_CNJ, faixaDeDias };
 })();

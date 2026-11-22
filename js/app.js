@@ -15,9 +15,9 @@
 
   const S = {
     perfil: null, usuarios: [], processos: [], cumpridos: [], importacoes: [],
-    comandos: [], repasses: [], meta: null
+    comandos: [], repasses: [], meta: null, filas: null
   };
-  const estadoParadosInicial = () => ({ faixa: null, eAcima: false, local: null, seqs: null, busca: '', limite: 200, ocultarCumpridos: false });
+  const estadoParadosInicial = () => ({ faixa: null, eAcima: false, local: null, seqs: null, fila: '', busca: '', limite: 200, ocultarCumpridos: false });
   let estadoParados = estadoParadosInicial();
   let donoEstado = null; // filtros são zerados quando outro usuário entra no aparelho
 
@@ -39,7 +39,8 @@
       importacoes: () => DB.listarImportacoes(5).then((v) => (S.importacoes = v)),
       comandos: () => DB.listarComandos().then((v) => (S.comandos = v)),
       repasses: () => DB.listarRepasses().then((v) => (S.repasses = v)),
-      meta: () => DB.obterMeta(mesAtual()).then((v) => (S.meta = v))
+      meta: () => DB.obterMeta(mesAtual()).then((v) => (S.meta = v)),
+      filas: () => DB.ultimaFila().then((v) => (S.filas = v))
     };
     await Promise.all(quais.map((q) => tarefas[q]()));
   }
@@ -76,13 +77,15 @@
         <div class="cartao-cab"><h3>${ic('grafico')} ${esc(titulo)}</h3>${c.batida ? '<span class="selo ok">Meta batida</span>' : ''}</div>
         ${m ? `
         <div class="numeros">
-          <div><b>${c.entradas}</b><small>Entradas</small></div>
-          <div><b>${c.arquivados}</b><small>Arquivados</small></div>
-          <div><b>${c.meta}</b><small>Meta (Entr.+1)</small></div>
+          <div><b>${c.entradas}</b><small>Casos novos</small></div>
+          <div><b>${c.arquivados}</b><small>Baixados</small></div>
+          <div><b>${c.meta}</b><small>Meta (novos+1)</small></div>
           <div class="destaque"><b>${c.falta}</b><small>Faltam</small></div>
         </div>
         <div class="barra"><div style="width:${c.pct}%"></div></div>
-        <p class="dica">${c.batida ? 'Saldo positivo garantido neste mês.' : `Faltam ${c.falta} arquivamento(s) para fechar o mês com saldo positivo.`}</p>`
+        <p class="dica">${c.batida ? `Meta batida: ${c.arquivados - c.entradas} baixa(s) a mais do que entrou.` : `Faltam ${c.falta} baixa(s) para fechar o mês com saldo positivo.`}</p>
+        ${c.entradas ? `<div class="iad ${c.arquivados / c.entradas >= 1 ? 'bom' : 'ruim'}"><b>IAD ${(c.arquivados / c.entradas).toFixed(2).replace('.', ',')}</b>
+          <span>Índice de Atendimento à Demanda = baixados ÷ casos novos. Acima de 1,00 a comarca baixa mais do que recebe.</span></div>` : ''}`
         : '<p class="dica">Números do mês ainda não lançados pelo administrador.</p>'}
       </div>`;
   }
@@ -127,6 +130,7 @@
 
         <nav class="grade-modulos">
           <a class="modulo" href="#/parados"><span class="mod-ic">${ic('relogio')}</span><b>Processos Parados</b><small>Sua lista por faixa de dias</small>${pendentesCart.length ? `<span class="contador">${pendentesCart.length}</span>` : ''}</a>
+          <a class="modulo" href="#/filas"><span class="mod-ic">${ic('lista')}</span><b>Filas de Cumprimento</b><small>Onde os processos estão parados no SAJ</small></a>
           <a class="modulo" href="#/meta"><span class="mod-ic">${ic('alvo')}</span><b>Entradas e Meta</b><small>Quanto falta para o saldo positivo</small></a>
           <a class="modulo" href="#/gabinete"><span class="mod-ic">${ic('balanca')}</span><b>Gabinete e Comandos</b><small>Conclusos e determinações</small>${av.comandos.length ? `<span class="contador">${av.comandos.length}</span>` : ''}</a>
           <a class="modulo" href="#/repasses"><span class="mod-ic">${ic('setas')}</span><b>Repasse de Diligências</b><small>SISBAJUD, RENAJUD, ofícios…</small>${av.repasses.length ? `<span class="contador">${av.repasses.length}</span>` : ''}</a>
@@ -169,8 +173,16 @@
 
     const q = consultaHash();
     if (q.get('faixa')) { estadoParados.faixa = parseInt(q.get('faixa'), 10); estadoParados.eAcima = false; }
+    if (q.has('fila')) {
+      estadoParados.fila = q.get('fila'); estadoParados.faixa = null;
+      estadoParados.local = null; estadoParados.seqs = [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+      const ex = S.processos.find((p) => p.fila === estadoParados.fila);
+      if (ex) estadoParados.local = ex.local;
+    }
     if (estadoParados.seqs == null) {
-      estadoParados.seqs = (S.perfil.sequenciais && S.perfil.sequenciais.length) ? S.perfil.sequenciais.slice() : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+      // -1 = processos sem sequencial no SAJ
+      estadoParados.seqs = (S.perfil.sequenciais && S.perfil.sequenciais.length && !ehAdmin())
+        ? S.perfil.sequenciais.slice() : [-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
     }
     if (estadoParados.local == null) estadoParados.local = S.perfil.setor === 'Gabinete' ? 'Gabinete' : 'Cartório';
 
@@ -190,7 +202,9 @@
           <div class="faixas" id="faixas"></div>
           <label class="check"><input type="checkbox" id="eAcima"${estadoParados.eAcima ? ' checked' : ''}> incluir faixas acima da escolhida</label>
           <div class="rotulo"><b>3</b> · Sequenciais (finais)</div>
-          ${UI.chipsSeq(estadoParados.seqs, 'pSeq')}
+          ${UI.chipsSeq(estadoParados.seqs, 'pSeq').replace(/<\/div>$/, `<button type="button" class="chip chip-sem${estadoParados.seqs.includes(-1) ? ' on' : ''}" data-v="-1">Sem sequencial</button></div>`)}
+          <div class="rotulo"><b>4</b> · Fila do SAJ <span class="dica">(opcional)</span></div>
+          <select id="pFila"></select>
           <div class="linha">
             <input type="search" id="pBusca" placeholder="Buscar número…" value="${esc(estadoParados.busca)}" inputmode="numeric">
             <label class="check"><input type="checkbox" id="pOcultar"${estadoParados.ocultarCumpridos ? ' checked' : ''}> ocultar cumpridos</label>
@@ -212,6 +226,7 @@
     });
     $('#eAcima').addEventListener('change', (e) => { estadoParados.eAcima = e.target.checked; atualizar(); });
     $('#pSeq').addEventListener('click', () => setTimeout(() => { estadoParados.seqs = UI.lerChipsSeq($('#pSeq')); atualizar(); }, 0));
+    $('#pFila').addEventListener('change', (e) => { estadoParados.fila = e.target.value; estadoParados.limite = 200; atualizar(); });
     $('#pBusca').addEventListener('input', (e) => { estadoParados.busca = e.target.value; atualizar(); });
     $('#pOcultar').addEventListener('change', (e) => { estadoParados.ocultarCumpridos = e.target.checked; atualizar(); });
     $('#pLista').addEventListener('click', acaoProcesso);
@@ -222,7 +237,15 @@
     const st = estadoParados;
     const seqs = new Set(st.seqs);
     const cumpridos = new Map(S.cumpridos.map((c) => [c.numero, c]));
-    const base = S.processos.filter((p) => p.local === st.local && seqs.has(p.sequencial));
+    const base0 = S.processos.filter((p) => p.local === st.local && seqs.has(p.sequencial == null ? -1 : p.sequencial));
+    // Fila: opções com contagem (dentro do local e finais escolhidos)
+    const contFila = {};
+    for (const p of base0) if (p.fila) contFila[p.fila] = (contFila[p.fila] || 0) + 1;
+    const filasOrd = Object.keys(contFila).sort((a, b) => contFila[b] - contFila[a]);
+    if (st.fila && !contFila[st.fila]) filasOrd.unshift(st.fila);
+    $('#pFila').innerHTML = `<option value="">Todas as filas (${base0.length})</option>` +
+      filasOrd.map((f) => `<option value="${esc(f)}"${f === st.fila ? ' selected' : ''}>${esc(f)} (${contFila[f] || 0})</option>`).join('');
+    const base = st.fila ? base0.filter((p) => p.fila === st.fila) : base0;
 
     // Contadores por faixa (pendentes)
     const cont = {};
@@ -259,8 +282,12 @@
         <div class="proc-num">${esc(p.numero)}</div>
         <div class="proc-meta">
           <span class="badge ${classeFaixa(p.faixa)}">${esc(p.faixa_texto || rotuloFaixa(p.faixa))}</span>
-          <span>Seq. ${p.sequencial == null ? '—' : p.sequencial}</span>
+          <span>Seq. ${p.sequencial == null ? 'sem' : p.sequencial}</span>
           ${p.local ? `<span>${esc(p.local)}</span>` : ''}
+          ${p.ultima_mov ? `<span>Últ. mov. ${p.ultima_mov.split('-').reverse().join('/')}</span>` : ''}
+        </div>
+        ${p.fila ? `<div class="proc-fila">${ic('lista')} ${esc(p.fila)}</div>` : ''}
+        <div class="proc-meta">
           ${c ? `<span class="ok-txt">&#10003; ${esc(nomeUsuario(c.usuario_id))} · ${UI.dataHora(c.cumprido_em)}</span>` : ''}
         </div>
         ${semAcoes ? `<div class="proc-acoes"><button class="btn mini" data-acao="copiar">${ic('copiar')} Copiar</button></div>` : `
@@ -294,44 +321,67 @@
   }
 
   // ======================= 2. ENTRADAS E META =======================
+  // Dias úteis (seg–sex) de hoje até o fim do mês; feriados não são descontados
+  function diasUteisRestantes(mes) {
+    const [a, m] = mes.split('-').map(Number);
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+    const fim = new Date(a, m, 0);
+    let d = new Date(a, m - 1, 1);
+    if (hoje > d) d = hoje;
+    let n = 0;
+    for (; d <= fim; d.setDate(d.getDate() + 1)) { const w = d.getDay(); if (w !== 0 && w !== 6) n++; }
+    return n;
+  }
+
   async function telaMeta() {
     UI.topo('Entradas e Meta do Mês', 'Meta = Entradas + 1', true);
     const q = consultaHash();
     const mes = q.get('mes') || mesAtual();
     UI.render('<div class="carregando">Carregando…</div>');
     const m = await DB.obterMeta(mes);
+    const c = calcMeta(m);
+    const dias = diasUteisRestantes(mes);
+    const porDia = dias ? Math.ceil(c.falta / dias) : c.falta;
 
     UI.render(`
       <section>
-        ${UI.ajuda('meta', 'Como funciona a meta', [
-          'A meta do mês é sempre <b>Entradas + 1</b>: arquivar pelo menos um processo a mais do que entrou.',
-          '<b>Faltam</b> mostra quantos arquivamentos ainda são necessários.',
+        ${UI.ajuda('meta2', 'Como funciona a meta', [
+          'A meta do mês é sempre <b>Casos novos + 1</b>: a comarca precisa baixar pelo menos um processo a mais do que entrou.',
+          '<b>Faltam</b> mostra quantas baixas ainda são necessárias; o <b>ritmo</b> divide isso pelos dias úteis que restam.',
           'Quando a barra ficar <b>verde</b>, a meta do mês foi batida.',
-          ehAdmin() ? 'Administrador: lance os números no formulário abaixo ou importe a planilha de movimentação.' : 'Os números são lançados pelo administrador.'
+          ehAdmin() ? 'Administrador: importe a planilha <b>IAD</b> do SAJ Insights logo abaixo (ou digite os números).' : 'Os números vêm das planilhas do SAJ Insights importadas pelo administrador.'
         ])}
         <div class="cartao">
           <label>Escolha o mês<input type="month" id="mMes" value="${mes}" max="${mesAtual()}"></label>
         </div>
         ${cartaoTermometro(m, nomeMes(mes))}
-        <div class="cartao">
-          <h3>Como a meta é calculada</h3>
-          <p>Para fechar o mês com <b>saldo positivo</b>, a vara precisa arquivar pelo menos <b>uma unidade a mais</b> do que entrou.
-          Ex.: entraram 10 processos novos &rarr; meta mínima de 11 arquivamentos.</p>
-          <p class="dica">Faltam = (Entradas + 1) &minus; Arquivados.</p>
-        </div>
+        ${m && !c.batida && mes === mesAtual() ? `
+        <div class="cartao ritmo">
+          <h3>${ic('relogio')} Ritmo necessário</h3>
+          <div class="numeros">
+            <div><b>${c.falta}</b><small>Baixas que faltam</small></div>
+            <div><b>${dias}</b><small>Dias úteis restantes</small></div>
+            <div class="destaque"><b>${porDia}</b><small>Baixas por dia útil</small></div>
+          </div>
+          <p class="dica">Sem contar feriados. Cada baixa conta: arquivamento definitivo, extinção, remessa etc., conforme o relatório de Baixados.</p>
+        </div>` : ''}
+        ${m ? `<p class="dica centro">Atualizado em ${UI.dataHora(m.atualizado_em)}</p>` : ''}
         ${ehAdmin() ? `
+        <div class="cartao">
+          <h3>${ic('enviar')} Importar do SAJ Insights</h3>
+          <div class="slots">
+            ${slotHTML('iad', 'A', 'IAD, Casos Novos e Baixados', 'Recomendado: a planilha "IAD" preenche entradas e baixados de uma vez.', '')}
+            ${slotHTML('baixados', 'B', 'Baixados (lista)', 'Lista de processos baixados no mês. O app conta quantos.', '')}
+            ${slotHTML('entradas', 'C', 'Casos Novos (lista)', 'Lista de processos novos no mês (entradas). O app conta quantos.', '')}
+          </div>
+        </div>
         <form class="cartao" id="fMeta">
-          <h3>Lançar números de ${esc(nomeMes(mes))}</h3>
+          <h3>${ic('lista')} Ou digite os números de ${esc(nomeMes(mes))}</h3>
           <div class="linha2">
-            <label>Entradas no mês<input type="number" min="0" id="mEnt" value="${m ? m.entradas : 0}" required></label>
-            <label>Arquivados no mês<input type="number" min="0" id="mArq" value="${m ? m.arquivados : 0}" required></label>
+            <label>Casos novos (entradas)<input type="number" min="0" id="mEnt" value="${m ? m.entradas : 0}" required></label>
+            <label>Baixados no mês<input type="number" min="0" id="mArq" value="${m ? m.arquivados : 0}" required></label>
           </div>
           <button class="btn primario" type="submit">Salvar</button>
-          <div class="separador">ou</div>
-          <label class="arquivo">Importar relatório de movimentação (Data, Tipo, Processo)
-            <input type="file" id="mArquivo" accept=".xlsx,.xls,.csv"></label>
-          <div id="mImport" class="dica"></div>
-          ${m ? `<p class="dica">Última atualização: ${UI.dataHora(m.atualizado_em)}</p>` : ''}
         </form>` : ''}
       </section>`);
 
@@ -345,21 +395,197 @@
           telaMeta();
         });
       });
-      $('#mArquivo').addEventListener('change', async (e) => {
-        const f = e.target.files[0]; if (!f) return;
-        try {
-          const r = await Parser.lerMovimentacao(f);
-          const doMes = r.meses[mes];
-          const outros = Object.keys(r.meses).sort().map((k) => `${k}: ${r.meses[k].entradas} entr. / ${r.meses[k].arquivados} arq.`).join(' · ');
-          if (doMes) {
-            $('#mEnt').value = doMes.entradas; $('#mArq').value = doMes.arquivados;
-            $('#mImport').innerHTML = `Lido da planilha para ${esc(nomeMes(mes))}: <b>${doMes.entradas}</b> entradas e <b>${doMes.arquivados}</b> arquivados. Confira e toque em <b>Salvar</b>.<br>Meses encontrados: ${esc(outros)}`;
-          } else {
-            $('#mImport').innerHTML = `A planilha não tem lançamentos de ${esc(nomeMes(mes))}. Meses encontrados: ${esc(outros)}`;
-          }
-        } catch (err) { $('#mImport').textContent = err.message; }
-      });
+      ligarSlots(() => telaMeta());
     }
+  }
+
+  // ======================= FILAS DE CUMPRIMENTO =======================
+  const ORDEM_FAIXA = ['1 a 15 dias', '+ 15 dias', '+ 30 dias', '+ 60 dias', '+ 100 dias', '+ 120 dias', '+ 180 dias', '+ 365 dias'];
+  const COR_FAIXA = { '1 a 15 dias': '#4d8dff', '+ 15 dias': '#7fb0ff', '+ 30 dias': '#e9c46a', '+ 60 dias': '#f4a259', '+ 100 dias': '#e5603e', '+ 120 dias': '#d43a3a', '+ 180 dias': '#b02a2a', '+ 365 dias': '#8a1c1c' };
+  const ordFaixa = (f) => { const i = ORDEM_FAIXA.indexOf(f); return i < 0 ? 99 : i; };
+  const estadoFilas = { area: 'Todas', aberta: null };
+
+  async function telaFilas() {
+    UI.topo('Filas de Cumprimento', 'Fluxo e Fila do SAJ', true);
+    UI.render('<div class="carregando">Carregando filas…</div>');
+    await carregar('filas', 'processos');
+    const snap = S.filas;
+    if (!snap) {
+      UI.render(`<section><div class="vazio">${ic('lista')}<p>As filas ainda não foram importadas.</p>
+        ${ehAdmin() ? '<a class="btn primario" href="#/admin">Importar planilha Fluxo e Fila</a>' : '<p class="dica">O administrador precisa importar a planilha "Fluxo e Fila" do SAJ Insights.</p>'}</div></section>`);
+      return;
+    }
+    UI.render(`
+      <section>
+        ${UI.ajuda('filas', 'Como ler esta tela', [
+          'Cada cartão é uma <b>fila do SAJ</b>, da maior para a menor, com o total de processos parados nela.',
+          'A barra colorida mostra <b>há quanto tempo</b> estão na fila: azul = recente, amarelo/laranja = atenção, vermelho = mais de 100 dias.',
+          'Use as abas para ver só <b>Cível</b> ou <b>Criminal</b>. Toque num cartão para ver os números e abrir os processos daquela fila.'
+        ])}
+        <div class="cartao resumo-filas">
+          <div class="numeros">
+            <div class="destaque"><b>${snap.total.toLocaleString('pt-BR')}</b><small>Processos nas filas</small></div>
+            <div><b id="fQtdFilas">–</b><small>Filas com processos</small></div>
+            <div><b id="fMais100">–</b><small>Há +100 dias</small></div>
+          </div>
+          <p class="dica">Referência ${snap.referencia ? esc(snap.referencia.split('-').reverse().join('/')) : '—'} · importado em ${UI.dataHora(snap.criado_em)}</p>
+          <div class="legenda">${ORDEM_FAIXA.slice(0, 5).map((f) => `<span><i style="background:${COR_FAIXA[f]}"></i>${f}</span>`).join('')}</div>
+        </div>
+        <div class="abas" id="fAbas">${['Todas', 'Cível', 'Criminal', 'Outros'].map((a) => `<button class="aba${estadoFilas.area === a ? ' on' : ''}" data-a="${a}">${a}</button>`).join('')}</div>
+        <div id="fLista" class="lista filas"></div>
+      </section>`);
+    $('#fAbas').addEventListener('click', (e) => {
+      const b = e.target.closest('.aba'); if (!b) return;
+      estadoFilas.area = b.dataset.a; estadoFilas.aberta = null;
+      $$('#fAbas .aba').forEach((x) => x.classList.toggle('on', x === b)); desenharFilas();
+    });
+    $('#fLista').addEventListener('click', (e) => {
+      const card = e.target.closest('.fila-card'); if (!card || e.target.closest('a')) return;
+      estadoFilas.aberta = estadoFilas.aberta === card.dataset.fila ? null : card.dataset.fila; desenharFilas();
+    });
+    desenharFilas();
+  }
+
+  function desenharFilas() {
+    const itens = S.filas.itens.filter((x) => estadoFilas.area === 'Todas' || x.area === estadoFilas.area);
+    const grupos = new Map();
+    for (const x of itens) {
+      const g = grupos.get(x.fila) || { fila: x.fila, total: 0, faixas: {} };
+      g.total += x.qtd; g.faixas[x.faixa] = (g.faixas[x.faixa] || 0) + x.qtd;
+      grupos.set(x.fila, g);
+    }
+    const lista = [...grupos.values()].sort((a, b) => b.total - a.total);
+    const mais100 = itens.filter((x) => ordFaixa(x.faixa) >= ordFaixa('+ 100 dias')).reduce((a, b) => a + b.qtd, 0);
+    $('#fQtdFilas').textContent = lista.length;
+    $('#fMais100').textContent = mais100.toLocaleString('pt-BR');
+    const procPorFila = {};
+    for (const p of S.processos) if (p.fila) procPorFila[p.fila] = (procPorFila[p.fila] || 0) + 1;
+
+    $('#fLista').innerHTML = lista.map((g) => {
+      const faixas = Object.keys(g.faixas).sort((a, b) => ordFaixa(a) - ordFaixa(b));
+      const nome = g.fila.replace(/^\d+\s*-\s*/, '');
+      const codigo = (g.fila.match(/^(\d+)/) || [])[1];
+      const tags = [];
+      if (/urgente|protetiva|preso/i.test(g.fila)) tags.push('<span class="badge f365">Urgente</span>');
+      if (/conclus/i.test(g.fila)) tags.push('<span class="badge">Gabinete</span>');
+      if (/sisbajud|bacen|renajud|infojud|sistemas externos/i.test(g.fila)) tags.push('<span class="badge dil">Sistemas</span>');
+      const aberta = estadoFilas.aberta === g.fila;
+      const nProc = procPorFila[g.fila] || 0;
+      return `
+        <div class="fila-card${aberta ? ' aberta' : ''}" data-fila="${esc(g.fila)}">
+          <div class="fila-topo">
+            <div class="fila-nome"><b>${esc(nome)}</b><small>${codigo ? 'Fila ' + codigo : ''} ${tags.join(' ')}</small></div>
+            <div class="fila-total">${g.total.toLocaleString('pt-BR')}</div>
+          </div>
+          <div class="barra-pilha">${faixas.map((f) => `<span style="width:${(g.faixas[f] / g.total * 100).toFixed(2)}%;background:${COR_FAIXA[f] || '#888'}" title="${esc(f)}: ${g.faixas[f]}"></span>`).join('')}</div>
+          ${aberta ? `
+          <div class="fila-detalhe">
+            ${faixas.map((f) => `<div><i style="background:${COR_FAIXA[f] || '#888'}"></i>${esc(f)}<b>${g.faixas[f]}</b></div>`).join('')}
+            ${nProc ? `<a class="btn primario" href="#/parados?fila=${encodeURIComponent(g.fila)}">${ic('relogio')} Ver os ${nProc} processos parados desta fila</a>`
+                    : '<p class="dica">Nenhum processo desta fila no relatório de "sem movimentação" (só entram lá os parados há mais de 30 dias).</p>'}
+          </div>` : ''}
+        </div>`;
+    }).join('') || '<div class="vazio">Nenhuma fila nesta área.</div>';
+  }
+
+  // ======================= IMPORTAÇÃO (cartões de arquivo) =======================
+  const TIPO_ESPERADO = { parados: 'parados', filas: 'filas', iad: 'iad', baixados: 'lista', entradas: 'lista' };
+  const NOME_TIPO = { parados: 'Processos sem movimentação', filas: 'Fluxo e Fila', iad: 'IAD (Casos Novos e Baixados)', lista: 'lista de processos do mês (Baixados ou Casos Novos)' };
+  function slotHTML(tipo, num, titulo, desc, info) {
+    return `
+      <div class="slot" data-tipo="${tipo}">
+        <div class="slot-num">${num}</div>
+        <div class="slot-txt"><b>${titulo}</b><small>${desc}</small>${info ? `<small class="ok-txt">${info}</small>` : ''}</div>
+        <label class="btn secundario slot-btn">${ic('enviar')} Escolher<input type="file" accept=".xlsx,.xls,.csv" data-tipo="${tipo}" hidden></label>
+      </div>
+      <div class="slot-previa" id="prev-${tipo}"></div>`;
+  }
+  function ligarSlots(depois) {
+    $$('input[type=file][data-tipo]').forEach((inp) => inp.addEventListener('change', async (e) => {
+      const f = e.target.files[0]; const tipo = e.target.dataset.tipo; e.target.value = '';
+      if (!f) return;
+      const alvo = $('#prev-' + tipo);
+      alvo.innerHTML = '<div class="carregando">Lendo planilha…</div>';
+      try {
+        const qual = await Parser.identificar(f);
+        if (qual !== TIPO_ESPERADO[tipo]) {
+          alvo.innerHTML = `<p class="alerta-txt">${qual ? `Este arquivo parece ser <b>${NOME_TIPO[qual]}</b>, não "${esc(tipo)}". Use o cartão certo.` : 'Não reconheci esta planilha. Envie o arquivo .xlsx como veio do SAJ Insights.'}</p>`;
+          return;
+        }
+        if (tipo === 'parados') return previaParados(f, alvo, depois);
+        if (tipo === 'filas') return previaFilas(f, alvo, depois);
+        if (tipo === 'iad') return previaIAD(f, alvo, depois);
+        return previaLista(f, tipo, alvo, depois);
+      } catch (err) { alvo.innerHTML = `<p class="alerta-txt">${esc(err.message)}</p>`; }
+    }));
+  }
+  async function previaParados(f, alvo, depois) {
+    const res = await Parser.lerParados(f);
+    const r = res.resumo;
+    const faixas = Object.keys(r.porFaixa).map(Number).sort((a, b) => b - a);
+    const ant = S.importacoes[0];
+    alvo.innerHTML = `
+      <div class="previa">
+        <div><b>${r.total}</b> processos sem movimentação${r.referencia ? ` (ref. ${esc(r.referencia.split('-').reverse().join('/'))})` : ''}${ant ? ` · relatório anterior: ${ant.total}` : ''}</div>
+        <div class="mini-faixas">${faixas.map((x) => `<span class="badge ${classeFaixa(x)}">${rotuloFaixa(x)}: ${r.porFaixa[x]}</span>`).join('')}</div>
+        <div>Cartório: <b>${r.porLocal['Cartório'] || 0}</b> · Gabinete: <b>${r.porLocal['Gabinete'] || 0}</b> · Sem local: <b>${r.porLocal[''] || 0}</b></div>
+        <div>Com fila do SAJ: <b>${r.comFila || 0}</b></div>
+        ${r.semSequencial ? `<div class="alerta-txt">${r.semSequencial} sem sequencial no SAJ — aparecem para quem marcar "Sem sequencial" nos filtros.</div>` : ''}
+        ${r.ignoradosSegredo ? `<div>${r.ignoradosSegredo} ignorado(s) por segredo de justiça</div>` : ''}
+        <button class="btn primario">${ic('check')} Substituir base atual por esta</button>
+      </div>`;
+    $('.btn.primario', alvo).addEventListener('click', (ev) => UI.ocupado(ev.currentTarget, async () => {
+      const n = await DB.substituirAcervo(res.itens, r);
+      UI.toast(`Base atualizada: ${n} processos.`, 'ok'); depois();
+    }));
+  }
+  async function previaFilas(f, alvo, depois) {
+    const r = await Parser.lerFilas(f);
+    const porFila = {};
+    for (const x of r.itens) porFila[x.fila] = (porFila[x.fila] || 0) + x.qtd;
+    const top = Object.entries(porFila).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    alvo.innerHTML = `
+      <div class="previa">
+        <div><b>${r.total.toLocaleString('pt-BR')}</b> processos em <b>${Object.keys(porFila).length}</b> filas${r.referencia ? ` (ref. ${esc(r.referencia.split('-').reverse().join('/'))})` : ''}</div>
+        <div class="dica">Maiores filas: ${top.map(([k, v]) => `${esc(k)} (${v})`).join(' · ')}</div>
+        <button class="btn primario">${ic('check')} Gravar filas</button>
+      </div>`;
+    $('.btn.primario', alvo).addEventListener('click', (ev) => UI.ocupado(ev.currentTarget, async () => {
+      await DB.salvarFilas(r.itens, r.total, r.referencia);
+      UI.toast('Filas atualizadas.', 'ok'); depois();
+    }));
+  }
+  async function previaIAD(f, alvo, depois) {
+    const r = await Parser.lerIAD(f);
+    const meses = Object.keys(r.meses).sort();
+    alvo.innerHTML = `
+      <div class="previa">
+        ${meses.map((m) => { const v = r.meses[m]; const iad = v.entradas ? (v.arquivados / v.entradas) : 0;
+          return `<div class="linha"><span>${esc(nomeMes(m))}: <b>${v.entradas}</b> casos novos · <b>${v.arquivados}</b> baixados · IAD <b>${iad.toFixed(2).replace('.', ',')}</b></span>
+          <button class="btn mini ok" data-mes="${m}">${ic('check')} Gravar</button></div>`; }).join('')}
+        <p class="dica">Preenche Entradas (casos novos) e Baixados do mês de uma vez.</p>
+      </div>`;
+    $$('[data-mes]', alvo).forEach((b) => b.addEventListener('click', (ev) => UI.ocupado(ev.currentTarget, async () => {
+      const v = r.meses[b.dataset.mes];
+      await DB.salvarMeta(b.dataset.mes, Math.round(v.entradas), Math.round(v.arquivados));
+      UI.toast(`Casos novos e baixados de ${nomeMes(b.dataset.mes)} gravados.`, 'ok'); depois();
+    })));
+  }
+  async function previaLista(f, tipo, alvo, depois) {
+    const r = await Parser.lerListaMes(f);
+    const campo = tipo === 'baixados' ? 'arquivados' : 'entradas';
+    const rot = tipo === 'baixados' ? 'Baixados' : 'Casos Novos';
+    const meses = Object.keys(r.meses).sort();
+    alvo.innerHTML = `
+      <div class="previa">
+        ${meses.map((m) => `<div class="linha"><span>${esc(nomeMes(m))}: <b>${r.meses[m]}</b> ${rot.toLowerCase()}</span>
+          <button class="btn mini ok" data-mes="${m}">${ic('check')} Gravar como ${rot}</button></div>`).join('')}
+        <p class="dica">Conta cada número de processo uma única vez.</p>
+      </div>`;
+    $$('[data-mes]', alvo).forEach((b) => b.addEventListener('click', (ev) => UI.ocupado(ev.currentTarget, async () => {
+      await DB.salvarMetaCampo(b.dataset.mes, campo, r.meses[b.dataset.mes]);
+      UI.toast(`${rot} de ${nomeMes(b.dataset.mes)} gravados.`, 'ok'); depois();
+    })));
   }
 
   // ======================= 4. GABINETE E COMANDOS =======================
@@ -596,12 +822,11 @@
   }
 
   // ======================= 3. ADMINISTRAÇÃO =======================
-  let previaImport = null;
   async function telaAdmin() {
     if (!ehAdmin()) { location.hash = '#/'; return; }
     UI.topo('Administração', 'Perfis, base e QR Code', true);
     UI.render('<div class="carregando">Carregando…</div>');
-    await carregar('usuarios', 'importacoes');
+    await carregar('usuarios', 'importacoes', 'filas', 'meta');
     const pend = S.usuarios.filter((u) => u.status === 'pendente');
     const equipe = S.usuarios.filter((u) => u.status !== 'pendente');
     // Sempre o endereço oficial (se o app for aberto pelo arquivo do PC, o QR não aponta para o computador)
@@ -611,7 +836,7 @@
       <section>
         ${UI.ajuda('admin', 'O que fazer aqui', [
           'Confira os <b>cadastros pendentes</b>: ajuste setor e sequenciais e toque em <b>Aprovar</b>.',
-          'Em <b>Atualizar base</b>, envie a planilha do SAJ Insights. Confira o resumo antes de confirmar.',
+          'Em <b>Atualizar dados do SAJ Insights</b>, envie cada relatório no seu cartão (1, 2 e 3 bastam). Confira o resumo antes de gravar.',
           'Mostre ou imprima o <b>QR Code</b> para os colegas instalarem o app.'
         ])}
         <div class="cartao">
@@ -620,12 +845,18 @@
         </div>
 
         <div class="cartao">
-          <h3>${ic('enviar')} Atualizar base (planilha do SAJ Insights)</h3>
-          <p class="dica">Envie o relatório de processos parados como veio do SAJ (.xlsx/.csv). O app lê só as colunas <b>Faixa de Dias, Processo, Cartório/Gabinete e Sequencial</b> e ignora o resto. O arquivo é lido aqui no aparelho; só esses 4 campos vão para o banco.</p>
-          <label class="arquivo">Escolher planilha<input type="file" id="aArquivo" accept=".xlsx,.xls,.csv"></label>
-          <div id="aPrevia"></div>
-          ${S.importacoes.length ? `<div class="historico"><div class="rotulo">Últimas importações</div>
-            ${S.importacoes.map((i) => `<div>${UI.dataHora(i.criado_em)} — <b>${i.total}</b> processos (${esc(nomeUsuario(i.usuario_id))})</div>`).join('')}</div>` : ''}
+          <h3>${ic('enviar')} Atualizar dados do SAJ Insights</h3>
+          <p class="dica">Envie cada relatório do jeito que sai do SAJ Insights (.xlsx). O arquivo é lido aqui no aparelho; nomes de partes e demais colunas não vão para o banco.</p>
+          <div class="slots">
+            ${slotHTML('parados', '1', 'Processos sem movimentação', 'Lista com Faixa de Dias, Processo, Fila, Cartório/Gabinete e Sequencial.',
+              S.importacoes[0] ? `Última: ${UI.dataHora(S.importacoes[0].criado_em)} · ${S.importacoes[0].total} processos` : '')}
+            ${slotHTML('filas', '2', 'Fluxo e Fila', 'Resumo das filas de cumprimento (só quantidades).',
+              S.filas ? `Última: ${UI.dataHora(S.filas.criado_em)} · ${S.filas.total} processos` : '')}
+            ${slotHTML('iad', '3', 'IAD, Casos Novos e Baixados', 'Preenche de uma vez as Entradas (casos novos) e os Baixados da meta.',
+              S.meta ? `Mês atual: ${S.meta.entradas} casos novos · ${S.meta.arquivados} baixados` : '')}
+            ${slotHTML('baixados', '4', 'Baixados (lista)', 'Opcional, se não tiver a planilha IAD: conta os baixados.', '')}
+            ${slotHTML('entradas', '5', 'Casos Novos (lista)', 'Opcional, se não tiver a planilha IAD: conta as entradas.', '')}
+          </div>
         </div>
 
         <div class="cartao">
@@ -666,33 +897,7 @@
     $('#app > section').addEventListener('click', acaoUsuario);
 
     // Importação
-    $('#aArquivo').addEventListener('change', async (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      $('#aPrevia').innerHTML = '<p class="dica">Lendo planilha…</p>';
-      try {
-        previaImport = await Parser.lerParados(f);
-        const r = previaImport.resumo;
-        const faixas = Object.keys(r.porFaixa).map(Number).sort((a, b) => b - a);
-        const ant = S.importacoes[0];
-        $('#aPrevia').innerHTML = `
-          <div class="previa">
-            <div><b>${r.total}</b> processos encontrados na aba "${esc(r.aba)}"${ant ? ` (relatório anterior: ${ant.total})` : ''}</div>
-            <div class="mini-faixas">${faixas.map((f) => `<span class="badge ${classeFaixa(f)}">${rotuloFaixa(f)}: ${r.porFaixa[f]}</span>`).join('')}</div>
-            <div>Cartório: <b>${r.porLocal['Cartório'] || 0}</b> · Gabinete: <b>${r.porLocal['Gabinete'] || 0}</b> · Sem local: <b>${r.porLocal[''] || 0}</b></div>
-            ${r.semSequencial ? `<div class="alerta-txt">${r.semSequencial} sem sequencial (não aparecerão para nenhum servidor)</div>` : ''}
-            ${r.ignoradosSegredo ? `<div>${r.ignoradosSegredo} ignorado(s) por segredo de justiça</div>` : ''}
-            ${r.ignoradosInvalidos ? `<div>${r.ignoradosInvalidos} linha(s) sem número CNJ válido ignorada(s)</div>` : ''}
-            <div class="dica">Colunas reconhecidas: ${Object.entries(r.colunas).filter(([, v]) => v).map(([k, v]) => `${k} = "${esc(v)}"`).join(' · ')}</div>
-            <button class="btn primario" id="aConfirmar">Substituir base atual por esta</button>
-          </div>`;
-        $('#aConfirmar').addEventListener('click', (ev) => UI.ocupado(ev.target, async () => {
-          const n = await DB.substituirAcervo(previaImport.itens, previaImport.resumo);
-          UI.toast(`Base atualizada: ${n} processos.`, 'ok');
-          previaImport = null;
-          telaAdmin();
-        }));
-      } catch (err) { $('#aPrevia').innerHTML = `<p class="alerta-txt">${esc(err.message)}</p>`; }
-    });
+    ligarSlots(() => telaAdmin());
 
     if (DB.modo === 'demo') {
       $('#dGerar').addEventListener('click', (ev) => UI.ocupado(ev.target, async () => {
@@ -810,6 +1015,20 @@
     } finally { rodando = false; }
   }
 
+  // Transição entre telas: avança deslizando da direita, volta deslizando da esquerda
+  const ORDEM_TELAS = ['/', '/parados', '/filas', '/meta', '/gabinete', '/repasses', '/admin', '/conta'];
+  let rotaAtual = null;
+  function transicao(rota) {
+    const app = document.getElementById('app');
+    const de = ORDEM_TELAS.indexOf(rotaAtual), para = ORDEM_TELAS.indexOf(rota);
+    const mudou = rotaAtual !== null && rota !== rotaAtual;
+    rotaAtual = rota;
+    if (!mudou) return;
+    app.classList.remove('vai-frente', 'vai-tras');
+    void app.offsetWidth; // reinicia a animação
+    app.classList.add(para >= de ? 'vai-frente' : 'vai-tras');
+  }
+
   async function rotearUmaVez() {
     if (App.recuperandoSenha) return Auth.telaNovaSenha();
     const rota = (location.hash.replace(/^#/, '').split('?')[0]) || '/';
@@ -831,9 +1050,10 @@
       estadoRep.aba = 'para';
     }
 
-    UI.nav(['/', '/parados', '/meta', '/gabinete', '/repasses'].includes(rota) ? rota : '');
+    UI.nav(['/', '/parados', '/filas', '/meta', '/gabinete', '/repasses'].includes(rota) ? rota : '');
+    transicao(rota);
     const telas = {
-      '/': telaInicio, '/parados': telaParados, '/meta': telaMeta, '/gabinete': telaGabinete,
+      '/': telaInicio, '/parados': telaParados, '/filas': telaFilas, '/meta': telaMeta, '/gabinete': telaGabinete,
       '/repasses': telaRepasses, '/admin': telaAdmin, '/conta': telaConta
     };
     try { await (telas[rota] || telaInicio)(); }
