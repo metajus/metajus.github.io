@@ -13,7 +13,7 @@
 // ============================================================
 window.METAJUS_CONFIG = {
   SUPABASE_URL: 'https://tfwchbdtqpzyaohwvbdk.supabase.co',
-  SUPABASE_ANON_KEY: '',
+  SUPABASE_ANON_KEY: 'sb_publishable_riODtbq4isv1sxXfqKdbxQ_4RkFIt7c',
 
   NOME_UNIDADE: 'Comarca de Santa Luzia do Norte',
 
