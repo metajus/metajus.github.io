@@ -1,7 +1,7 @@
 // Service Worker do MetaJus — guarda só a "casca" do app (telas, estilos, scripts).
 // Dados de processos NUNCA são guardados em cache: vêm sempre do banco.
 // Ao publicar uma nova versão, aumente o número abaixo para os celulares atualizarem.
-const VERSAO = 'metajus-v1';
+const VERSAO = 'metajus-v2';
 
 const ARQUIVOS = [
   './',
@@ -44,8 +44,9 @@ self.addEventListener('fetch', (e) => {
   if (!mesmoSite && !biblioteca) return; // Supabase e demais: direto na rede, sem cache
 
   // Rede primeiro (pega versão nova), cache como reserva quando estiver sem internet.
+  // 'no-cache' = sempre confere com o servidor se há versão nova (evita ficar preso em arquivo antigo)
   e.respondWith(
-    fetch(req)
+    fetch(mesmoSite ? new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : req)
       .then((resp) => {
         if (resp && resp.ok) {
           const copia = resp.clone();
