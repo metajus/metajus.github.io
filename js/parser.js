@@ -273,10 +273,74 @@
     throw new Error('Não encontrei as colunas "Mês/Ano", "Casos Novos" e "Baixados" nesta planilha.');
   }
 
+
+  // --------------------------------------------------------
+  // Metas CNJ (painel "(PG) Metas CNJ" do SAJ Insights)
+  //   Perguntas Únicas:  n | Pergunta | Processo | Foro | Vara | Classe | Assunto
+  //   Perguntas Mensais: n | Mês/Ano | Pergunta | Processo | ...
+  //   Pergunta = "P2.26 - Saldo - Primeiro Grau" etc.
+  // --------------------------------------------------------
+  function mapaMetaCNJ(cab) {
+    const pergunta = acharCol(cab, (c) => c.startsWith('pergunta'));
+    const processo = acharCol(cab, (c) => c === 'processo' || c.startsWith('processo'));
+    if (pergunta < 0 || processo < 0) return null;
+    return { pergunta, processo, mes: acharCol(cab, (c) => c.replace(/\s/g, '') === 'mes/ano'),
+             classe: acharCol(cab, (c) => c.startsWith('classe')), assunto: acharCol(cab, (c) => c.startsWith('assunto')) };
+  }
+  async function lerMetaCNJ(file) {
+    const abas = await lerArquivo(file, true);
+    for (const aba of abas) {
+      const cab = acharCabecalho(aba.linhas, mapaMetaCNJ);
+      if (!cab) continue;
+      const m = cab.mapa;
+      const unicas = {}, mensais = {}, nomes = {}, listas = {};
+      let meta = null;
+      for (const l of aba.linhas) for (const c of (l || [])) {
+        const x = String(c || '').match(/meta\s+[eé]\s+(\d+)/i); if (x) meta = parseInt(x[1], 10);
+      }
+      for (let i = cab.indice + 1; i < aba.linhas.length; i++) {
+        const l = aba.linhas[i] || [];
+        const pq = txt(l[m.pergunta]).match(/^(P\d+\.\d+)\s*-\s*(.*)$/i);
+        const achou = txt(l[m.processo]).match(RE_CNJ);
+        if (!pq || !achou) continue;
+        const cod = pq[1].toUpperCase(); nomes[cod] = pq[2];
+        let mes = null;
+        if (m.mes >= 0) { const x = txt(l[m.mes]).match(/(\d{1,2})\/(\d{4})/); if (x) mes = x[2] + '-' + x[1].padStart(2, '0'); }
+        const alvo = mes ? ((mensais[mes] = mensais[mes] || {})) : unicas;
+        alvo[cod] = alvo[cod] || new Set();
+        alvo[cod].add(achou[0]);
+        const k = (mes || '') + '|' + cod;
+        (listas[k] = listas[k] || new Map()).set(achou[0], {
+          numero: achou[0], ano: parseInt(achou[0].slice(11, 15), 10),
+          classe: m.classe >= 0 ? txt(l[m.classe]).replace(/^\d+\s*-\s*/, '').slice(0, 80) : '',
+          assunto: m.assunto >= 0 ? txt(l[m.assunto]).replace(/^\d+\s*-\s*/, '').slice(0, 80) : ''
+        });
+      }
+      const conta = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v.size]));
+      const mesesOrd = Object.keys(mensais).sort();
+      if (!Object.keys(unicas).length && !mesesOrd.length) continue;
+      // Saldo (pendentes) = última pergunta "Saldo" do mês mais recente
+      let pendentes = null;
+      const ult = mesesOrd[mesesOrd.length - 1];
+      if (ult) {
+        const codSaldo = Object.keys(mensais[ult]).find((c) => /saldo/i.test(nomes[c]));
+        if (codSaldo) pendentes = [...listas[ult + '|' + codSaldo].values()].sort((a, b) => a.ano - b.ano || a.numero.localeCompare(b.numero));
+      }
+      return {
+        meta, tipo: mesesOrd.length ? 'mensais' : 'unicas', nomes,
+        unicas: conta(unicas),
+        mensais: Object.fromEntries(mesesOrd.map((k) => [k, conta(mensais[k])])),
+        pendentes, referencia: ult || referenciaDe(aba.linhas), aba: aba.nome
+      };
+    }
+    throw new Error('Não encontrei as colunas "Pergunta" e "Processo" (relatório de Metas CNJ).');
+  }
+
   // Descobre qual relatório é, pelo cabeçalho
   async function identificar(file) {
     const abas = await lerArquivo(file, true);
     for (const aba of abas) {
+      if (acharCabecalho(aba.linhas, mapaMetaCNJ)) return 'metacnj';
       if (acharCabecalho(aba.linhas, mapaIAD)) return 'iad';
       if (acharCabecalho(aba.linhas, mapaFilas)) return 'filas';
       if (acharCabecalho(aba.linhas, mapaParados)) return 'parados';
@@ -334,5 +398,5 @@
     throw new Error('Não encontrei as colunas "Data" e "Tipo" (Entrada/Arquivamento) na planilha.');
   }
 
-  window.Parser = { lerParados, lerMovimentacao, lerFilas, lerListaMes, lerIAD, identificar, area, RE_CNJ, faixaDeDias };
+  window.Parser = { lerMetaCNJ, lerParados, lerMovimentacao, lerFilas, lerListaMes, lerIAD, identificar, area, RE_CNJ, faixaDeDias };
 })();

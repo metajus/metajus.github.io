@@ -116,6 +116,12 @@
       async listarMetas() {
         return ok(await sb.from('metas_mensais').select('*').order('mes'));
       },
+      async ultimaMetaCNJ(meta) {
+        return ok(await sb.from('metas_cnj').select('*').eq('meta', meta).order('criado_em', { ascending: false }).limit(1).maybeSingle());
+      },
+      async salvarMetaCNJ(reg) {
+        ok(await sb.from('metas_cnj').insert(reg));
+      },
       async ultimaFila() {
         return ok(await sb.from('filas_snapshots').select('*').order('criado_em', { ascending: false }).limit(1).maybeSingle());
       },
@@ -256,6 +262,11 @@
         await this.salvarMeta(mes, campo === 'entradas' ? valor : atual.entradas, campo === 'arquivados' ? valor : atual.arquivados);
       },
       async listarMetas() { exigeAprovado(); return Object.values(st.metas).map(copia).sort((a, b) => a.mes.localeCompare(b.mes)); },
+      async ultimaMetaCNJ(meta) { exigeAprovado(); const l = (st.metasCnj || []).filter((x) => x.meta === meta); return l.length ? copia(l[l.length - 1]) : null; },
+      async salvarMetaCNJ(reg) {
+        const u = exigeAdmin();
+        (st.metasCnj = st.metasCnj || []).push({ id: st.seq++, criado_em: agora(), usuario_id: u.id, ...reg }); salvar();
+      },
       async ultimaFila() { exigeAprovado(); return st.filas ? copia(st.filas) : null; },
       async salvarFilas(itens, total, referencia) {
         const u = exigeAdmin();

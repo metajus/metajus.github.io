@@ -15,9 +15,9 @@
 
   const S = {
     perfil: null, usuarios: [], processos: [], cumpridos: [], importacoes: [],
-    comandos: [], repasses: [], meta: null, filas: null
+    comandos: [], repasses: [], meta: null, filas: null, meta2: null
   };
-  const estadoParadosInicial = () => ({ faixa: null, eAcima: false, local: null, seqs: null, fila: '', busca: '', limite: 200, ocultarCumpridos: false });
+  const estadoParadosInicial = () => ({ faixa: null, eAcima: false, local: null, seqs: null, fila: '', busca: '', limite: 200, ocultarCumpridos: false, soMeta2: false });
   let estadoParados = estadoParadosInicial();
   let donoEstado = null; // filtros são zerados quando outro usuário entra no aparelho
 
@@ -40,7 +40,8 @@
       comandos: () => DB.listarComandos().then((v) => (S.comandos = v)),
       repasses: () => DB.listarRepasses().then((v) => (S.repasses = v)),
       meta: () => DB.obterMeta(mesAtual()).then((v) => (S.meta = v)),
-      filas: () => DB.ultimaFila().then((v) => (S.filas = v))
+      filas: () => DB.ultimaFila().then((v) => (S.filas = v)),
+      meta2: () => DB.ultimaMetaCNJ(2).then((v) => { S.meta2 = v; m2Cache = null; }).catch(() => (S.meta2 = null))
     };
     await Promise.all(quais.map((q) => tarefas[q]()));
   }
@@ -60,6 +61,32 @@
       esp.has(c.urgencia)));
     const repasses = S.repasses.filter((r) => r.status === 'pendente' && r.destinatario_id === eu.id);
     return { comandos, repasses };
+  }
+
+  // ---------- Meta 2 CNJ (julgar os processos mais antigos) ----------
+  const M2_PCT = 0.8; // Justiça Estadual 1º grau 2026: julgar 80% dos distribuídos até 31/12/2022
+  let m2Cache = null;
+  function m2Mapa() {
+    if (!m2Cache) m2Cache = new Map(((S.meta2 && S.meta2.pendentes) || []).map((x) => [x.numero, x]));
+    return m2Cache;
+  }
+  function calcMeta2(snap) {
+    if (!snap) return null;
+    const r = snap.resumo || {}, u = r.unicas || {}, mens = r.mensais || {};
+    const ano = (snap.referencia || '').slice(0, 4);
+    const somaMes = (cod) => Object.entries(mens).filter(([m]) => !ano || m.startsWith(ano)).reduce((a, [, v]) => a + (v[cod] || 0), 0);
+    const estoque = u['P2.1'] || 0, antes = u['P2.25'] || 0, noAno = somaMes('P2.5');
+    const universo = estoque + antes, julgados = antes + noAno;
+    const alvo = Math.ceil(universo * M2_PCT);
+    const ult = mens[snap.referencia] || {};
+    return {
+      estoque, antes, noAno, universo, julgados, alvo,
+      faltam: Math.max(0, alvo - julgados),
+      pct: universo ? julgados / universo / M2_PCT * 100 : 0,
+      saldo: (snap.pendentes || []).length || ult['P2.26'] || 0,
+      sentencasMes: ult['P2.2'] || 0, julgadosMes: ult['P2.5'] || 0,
+      meses: Object.keys(mens).filter((m) => !ano || m.startsWith(ano)).sort()
+    };
   }
 
   function calcMeta(m) {
@@ -122,7 +149,9 @@
   async function telaInicio() {
     UI.topo('MetaJus', S.perfil.nome.split(' ')[0] + ' · ' + S.perfil.setor);
     UI.render('<div class="carregando">Carregando painel…</div>');
-    await carregar('processos', 'cumpridos', 'meta', 'comandos', 'repasses', 'importacoes', 'usuarios');
+    await carregar('processos', 'cumpridos', 'meta', 'comandos', 'repasses', 'importacoes', 'usuarios', 'meta2');
+    const m2c = calcMeta2(S.meta2);
+    const m2meus = (() => { const m2 = m2Mapa(); const seqs = new Set(S.perfil.sequenciais || []); return S.processos.filter((p) => m2.has(p.numero) && seqs.has(p.sequencial) && (S.perfil.setor === 'Híbrido' || p.local === S.perfil.setor)).length; })();
 
     const meus = meusProcessos();
     const cumpridosSet = new Set(S.cumpridos.map((c) => c.numero));
@@ -160,6 +189,7 @@
           <a class="modulo" href="#/parados"><span class="mod-ic">${ic('relogio')}</span><b>Processos Parados</b><small>Sua lista por faixa de dias</small>${pendentesCart.length ? `<span class="contador">${pendentesCart.length}</span>` : ''}</a>
           <a class="modulo" href="#/filas"><span class="mod-ic">${ic('lista')}</span><b>Filas de Cumprimento</b><small>Onde os processos estão parados no SAJ</small></a>
           <a class="modulo" href="#/meta"><span class="mod-ic">${ic('grafico')}</span><b>Painel e Meta</b><small>Gráficos da meta, evolução e acervo</small></a>
+          <a class="modulo m2" href="#/meta2"><span class="mod-ic">${ic('alvo')}</span><b>Meta 2 · CNJ</b><small>${m2c ? `${Graficos.fmt(Math.round(m2c.pct * 10) / 10)}% · ${m2c.saldo} antigos pendentes` : 'Processos mais antigos'}</small>${m2meus ? `<span class="contador">${m2meus}</span>` : ''}</a>
           <a class="modulo" href="#/gabinete"><span class="mod-ic">${ic('balanca')}</span><b>Gabinete e Comandos</b><small>Conclusos e determinações</small>${av.comandos.length ? `<span class="contador">${av.comandos.length}</span>` : ''}</a>
           <a class="modulo" href="#/repasses"><span class="mod-ic">${ic('setas')}</span><b>Repasse de Diligências</b><small>SISBAJUD, RENAJUD, ofícios…</small>${av.repasses.length ? `<span class="contador">${av.repasses.length}</span>` : ''}</a>
           ${ehAdmin() ? `<a class="modulo admin" href="#/admin"><span class="mod-ic">${ic('cadeado')}</span><b>Administração</b><small>Aprovar colegas, planilha e QR Code</small>${pendentesCad ? `<span class="contador">${pendentesCad}</span>` : ''}</a>` : ''}
@@ -198,9 +228,10 @@
   async function telaParados() {
     UI.topo('Processos Parados', 'Finais ' + UI.listaSeq(S.perfil.sequenciais), true);
     UI.render('<div class="carregando">Carregando processos…</div>');
-    await carregar('processos', 'cumpridos', 'usuarios');
+    await carregar('processos', 'cumpridos', 'usuarios', 'meta2');
 
     const q = consultaHash();
+    if (q.get('m2') === '1') { estadoParados.soMeta2 = true; estadoParados.faixa = null; }
     if (q.get('faixa')) { estadoParados.faixa = parseInt(q.get('faixa'), 10); estadoParados.eAcima = false; }
     if (q.has('fila')) {
       estadoParados.fila = q.get('fila'); estadoParados.faixa = null;
@@ -237,6 +268,7 @@
           <div class="linha">
             <input type="search" id="pBusca" placeholder="Buscar número…" value="${esc(estadoParados.busca)}" inputmode="numeric">
             <label class="check"><input type="checkbox" id="pOcultar"${estadoParados.ocultarCumpridos ? ' checked' : ''}> ocultar cumpridos</label>
+            ${S.meta2 ? `<label class="check m2-check"><input type="checkbox" id="pMeta2"${estadoParados.soMeta2 ? ' checked' : ''}> só <b>Meta 2</b></label>` : ''}
           </div>
         </div>
         <div id="pResumo" class="resumo-lista"></div>
@@ -258,6 +290,7 @@
     $('#pFila').addEventListener('change', (e) => { estadoParados.fila = e.target.value; estadoParados.limite = 200; atualizar(); });
     $('#pBusca').addEventListener('input', (e) => { estadoParados.busca = e.target.value; atualizar(); });
     $('#pOcultar').addEventListener('change', (e) => { estadoParados.ocultarCumpridos = e.target.checked; atualizar(); });
+    if ($('#pMeta2')) $('#pMeta2').addEventListener('change', (e) => { estadoParados.soMeta2 = e.target.checked; atualizar(); });
     $('#pLista').addEventListener('click', acaoProcesso);
     atualizar();
   }
@@ -266,7 +299,8 @@
     const st = estadoParados;
     const seqs = new Set(st.seqs);
     const cumpridos = new Map(S.cumpridos.map((c) => [c.numero, c]));
-    const base0 = S.processos.filter((p) => p.local === st.local && seqs.has(p.sequencial == null ? -1 : p.sequencial));
+    const m2 = m2Mapa();
+    const base0 = S.processos.filter((p) => p.local === st.local && seqs.has(p.sequencial == null ? -1 : p.sequencial) && (!st.soMeta2 || m2.has(p.numero)));
     // Fila: opções com contagem (dentro do local e finais escolhidos)
     const contFila = {};
     for (const p of base0) if (p.fila) contFila[p.fila] = (contFila[p.fila] || 0) + 1;
@@ -289,7 +323,7 @@
       (st.faixa == null || (st.eAcima ? p.faixa >= st.faixa : p.faixa === st.faixa)) &&
       (!digitos || p.numero.replace(/\D/g, '').includes(digitos)) &&
       (!st.ocultarCumpridos || !cumpridos.has(p.numero)));
-    lista.sort((a, b) => b.faixa - a.faixa || a.numero.localeCompare(b.numero));
+    lista.sort((a, b) => (m2.has(b.numero) - m2.has(a.numero)) || b.faixa - a.faixa || a.numero.localeCompare(b.numero));
 
     const feitos = lista.filter((p) => cumpridos.has(p.numero)).length;
     $('#pResumo').innerHTML = `${lista.length} processo(s) · ${feitos} cumprido(s)` +
@@ -311,6 +345,7 @@
         <div class="proc-num">${esc(p.numero)}</div>
         <div class="proc-meta">
           <span class="badge ${classeFaixa(p.faixa)}">${esc(p.faixa_texto || rotuloFaixa(p.faixa))}</span>
+          ${m2Mapa().has(p.numero) ? `<span class="badge m2" title="Meta 2 CNJ: processo antigo pendente de julgamento">Meta 2 · ${m2Mapa().get(p.numero).ano}</span>` : ''}
           <span>Seq. ${p.sequencial == null ? 'sem' : p.sequencial}</span>
           ${p.local ? `<span>${esc(p.local)}</span>` : ''}
           ${p.ultima_mov ? `<span>Últ. mov. ${p.ultima_mov.split('-').reverse().join('/')}</span>` : ''}
@@ -347,6 +382,7 @@
       }
     });
     if ($('#gLista')) desenharConclusos();
+    if ($('#m2Lista') && redesenharM2) redesenharM2();
   }
 
   // ======================= 2. ENTRADAS E META =======================
@@ -374,7 +410,7 @@
     const mes = q.get('mes') || mesAtual();
     if (q.get('aba')) estadoPainel.aba = q.get('aba');
     UI.render(`<section>${'<div class="cartao esqueleto"></div>'.repeat(3)}</section>`);
-    const [m, metas] = await Promise.all([DB.obterMeta(mes), DB.listarMetas().catch(() => []), S.processos.length ? null : carregar('processos'), S.filas ? null : carregar('filas').catch(() => null)]);
+    const [m, metas] = await Promise.all([DB.obterMeta(mes), DB.listarMetas().catch(() => []), S.processos.length ? null : carregar('processos'), S.filas ? null : carregar('filas').catch(() => null), carregar('meta2')]);
     const c = calcMeta(m);
     const dias = diasUteisRestantes(mes);
     const porDia = dias ? Math.ceil(c.falta / dias) : c.falta;
@@ -398,6 +434,7 @@
           </div>
           <p class="dica">Para bater a meta, a comarca precisa de <b>${porDia}</b> baixa(s) por dia útil até o fim do mês (feriados não descontados).</p>
         </div>` : ''}
+        ${S.meta2 ? cartaoMeta2(calcMeta2(S.meta2), true) : ''}
         ${m ? `<p class="dica centro">Atualizado em ${UI.dataHora(m.atualizado_em)}</p>` : ''}`;
 
     // ---------- Aba 2: Evolução ----------
@@ -565,6 +602,143 @@
     });
   }
 
+  // ======================= META 2 · CNJ =======================
+  const estadoM2 = { aba: 'todos', meus: false, busca: '', limite: 60 };
+  let redesenharM2 = null;
+  const ONDE_M2 = { todos: 'Todos', 'Cartório': 'Cartório', 'Gabinete': 'Gabinete', fora: 'Andando' };
+
+  function cartaoMeta2(c, compacto) {
+    const G = Graficos, COR = G.COR, ok = c.pct >= 100;
+    return `
+      <div class="cartao termometro ${ok ? 'batida' : ''}">
+        <div class="cartao-cab"><h3>${ic('alvo')} Meta 2 · processos mais antigos</h3>
+          <span class="selo ${ok ? 'ok' : 'alerta'}">${ok ? '&#10003; Meta atingida' : '&#9888; Em andamento'}</span></div>
+        <div class="kpis">
+          <div class="kpi ${compacto ? '' : 'destaque'}"><small>Cumprimento</small><b>${G.fmt(Math.round(c.pct * 10) / 10)}%</b></div>
+          <div class="kpi"><small><i class="sw" style="background:${ok ? COR.bom : COR.s1}"></i>Julgados</small><b>${G.fmt(c.julgados)}</b></div>
+          <div class="kpi"><small>Alvo 80%</small><b>${G.fmt(c.alvo)}</b></div>
+          <div class="kpi"><small>Faltam</small><b class="${c.faltam ? 'alerta-txt' : 'ok-txt'}">${G.fmt(c.faltam)}</b></div>
+        </div>
+        ${G.bullet({ valor: c.julgados, meta: c.alvo, rotuloValor: 'Julgados', rotuloMeta: 'Alvo 80%' })}
+        <p class="resumo-meta">${c.faltam
+          ? `Faltam julgar <b>${G.fmt(c.faltam)}</b> processo(s) antigos para chegar a 80%. Ainda há <b>${G.fmt(c.saldo)}</b> pendentes na lista do SAJ.`
+          : `A comarca já julgou <b>${G.fmt(c.julgados - c.alvo)}</b> a mais do que o alvo de 80%. Ainda há <b>${G.fmt(c.saldo)}</b> pendentes — julgar todos melhora o resultado.`}</p>
+        ${compacto ? '<a class="btn secundario largo" href="#/meta2">' + ic('alvo') + ' Ver a lista da Meta 2</a>' : ''}
+      </div>`;
+  }
+
+  async function telaMeta2() {
+    UI.topo('Meta 2 · CNJ', 'Julgar os processos mais antigos', true);
+    UI.render(`<section>${'<div class="cartao esqueleto"></div>'.repeat(3)}</section>`);
+    await carregar('processos', 'cumpridos', 'usuarios', 'meta2');
+    if (!S.meta2) {
+      UI.render(`<section><div class="vazio">${ic('alvo')}<p>Os dados da Meta 2 ainda não foram importados.</p>
+        ${ehAdmin() ? '<a class="btn primario" href="#/admin">Importar "Perguntas Únicas" e "Perguntas Mensais"</a>' : '<p class="dica">O administrador precisa importar as planilhas do painel "(PG) Metas CNJ" do SAJ Insights.</p>'}</div></section>`);
+      return;
+    }
+    const G = Graficos, COR = G.COR;
+    const c = calcMeta2(S.meta2);
+    const acervo = new Map(S.processos.map((p) => [p.numero, p]));
+    const pend = (S.meta2.pendentes || []).map((x) => ({ ...x, p: acervo.get(x.numero) }));
+    const onde = (x) => x.p ? (x.p.local || 'fora') : 'fora';
+    const cont = { 'Cartório': 0, 'Gabinete': 0, fora: 0 };
+    pend.forEach((x) => { cont[onde(x)] = (cont[onde(x)] || 0) + 1; });
+    const porAno = {};
+    pend.forEach((x) => { porAno[x.ano] = (porAno[x.ano] || 0) + 1; });
+    const anos = Object.keys(porAno).map(Number).sort((a, b) => a - b);
+    const limite15 = parseInt((S.meta2.referencia || String(new Date().getFullYear())).slice(0, 4), 10) - 15;
+    const porClasse = {};
+    pend.forEach((x) => { const k = x.classe || '—'; porClasse[k] = (porClasse[k] || 0) + 1; });
+    const topClasses = Object.entries(porClasse).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => ({ rotulo: k, valor: v }));
+    const ref = (S.meta2.referencia || '').split('-').reverse().join('/');
+    const mesRef = parseInt((S.meta2.referencia || '').slice(5, 7), 10) || 1;
+    const faltamMeses = c.meses.length < mesRef;
+
+    UI.render(`
+      <section>
+        ${UI.ajuda('meta2cnj', 'O que é a Meta 2 do CNJ', [
+          'É a meta de <b>julgar os processos mais antigos</b>: até 31/12/2026, a Justiça Estadual (1º grau) precisa ter julgado <b>pelo menos 80%</b> dos processos distribuídos até <b>31/12/2022</b>.',
+          '<b>Cartório</b>: impulsione primeiro os processos com o selo <b>Meta 2</b> (intimações, prazos, audiências) e faça-os <b>chegar conclusos</b> ao gabinete.',
+          '<b>Gabinete</b>: priorize a <b>sentença</b> desses processos — cada julgamento conta para a meta.',
+          'Os mais antigos aparecem primeiro. Use as abas para ver onde cada um está parado.'
+        ])}
+        ${cartaoMeta2(c)}
+        ${faltamMeses ? `<div class="aviso-m2">${ic('sino')}<span>Só ${c.meses.length ? 'o(s) mês(es) ' + c.meses.map((m) => m.split('-').reverse().join('/')).join(', ') : 'nenhum mês'} de ${(S.meta2.referencia || '').slice(0, 4)} foi importado em "Perguntas Mensais". Para o percentual ficar completo, o administrador deve exportar essa planilha com <b>todos os meses do ano</b> marcados no filtro.</span></div>` : ''}
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('relogio')} Em ${esc(ref)}</h3></div>
+          <div class="kpis kpis3">
+            <div class="kpi"><small>1ª sentença</small><b>${G.fmt(c.sentencasMes)}</b></div>
+            <div class="kpi"><small>Julgados</small><b>${G.fmt(c.julgadosMes)}</b></div>
+            <div class="kpi"><small>Pendentes</small><b class="alerta-txt">${G.fmt(c.saldo)}</b></div>
+          </div>
+          <p class="dica">Universo da meta: ${G.fmt(c.universo)} processos distribuídos até 2022 (${G.fmt(c.antes)} julgados até 2025 + ${G.fmt(c.estoque)} do estoque). Conta para a meta: julgados até 2025 + julgados em ${(S.meta2.referencia || '').slice(0, 4)}.</p>
+        </div>
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('balanca')} Onde estão os pendentes</h3></div>
+          ${G.pilha100([{ rotulo: 'Cartório', valor: cont['Cartório'], cor: COR.s1 }, { rotulo: 'Gabinete', valor: cont['Gabinete'], cor: COR.s2 }, { rotulo: 'Andando (sem parada +30 dias)', valor: cont.fora, cor: COR.neutro }])}
+          <div class="g-partes">
+            <div><i style="background:${COR.s1}"></i>Cartório<b>${cont['Cartório']}</b></div>
+            <div><i style="background:${COR.s2}"></i>Gabinete<b>${cont['Gabinete']}</b></div>
+            <div><i style="background:${COR.neutro}"></i>Andando<b>${cont.fora}</b></div>
+          </div>
+          <p class="dica">"Andando" = não estão na lista de parados há mais de 30 dias (tiveram movimento recente).</p>
+        </div>
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('ampulheta')} Pendentes por ano de distribuição</h3></div>
+          ${G.colunas(anos.map((a) => ({ rotulo: "'" + String(a).slice(2), valor: porAno[a], cor: a <= limite15 ? COR.s2 : COR.s1, tip: `Distribuídos em ${a}: ${porAno[a]}` })))}
+          ${anos.some((a) => a <= limite15) ? G.legenda([{ rotulo: 'Há 15 anos ou mais', cor: COR.s2 }, { rotulo: 'Demais', cor: COR.s1 }]) : ''}
+        </div>
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('lista')} Tipos de ação pendentes</h3></div>
+          ${G.barrasH(topClasses, { larguraRotulo: 170 })}
+        </div>
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('lista')} Lista dos pendentes</h3><span class="selo">mais antigos primeiro</span></div>
+          <div class="abas" id="m2Abas">${Object.entries(ONDE_M2).map(([k, t]) => `<button class="aba${estadoM2.aba === k ? ' on' : ''}" data-a="${k}">${t} <small>${k === 'todos' ? pend.length : cont[k] || 0}</small></button>`).join('')}</div>
+          <div class="linha">
+            <input type="search" id="m2Busca" placeholder="Buscar número ou classe…" value="${esc(estadoM2.busca)}">
+            ${(S.perfil.sequenciais || []).length ? `<label class="check"><input type="checkbox" id="m2Meus"${estadoM2.meus ? ' checked' : ''}> meus finais</label>` : ''}
+          </div>
+          <div id="m2Resumo" class="resumo-lista"></div>
+          <div id="m2Lista" class="lista"></div>
+        </div>
+        <p class="dica centro">Referência ${esc(ref)} · importado em ${UI.dataHora(S.meta2.criado_em)}</p>
+      </section>`);
+
+    const desenhar = () => {
+      const seqs = new Set(S.perfil.sequenciais || []);
+      const dig = estadoM2.busca.replace(/\D/g, ''), txt = estadoM2.busca.trim().toLowerCase();
+      const lista = pend.filter((x) => (estadoM2.aba === 'todos' || onde(x) === estadoM2.aba) &&
+        (!estadoM2.meus || (x.p && seqs.has(x.p.sequencial))) &&
+        (!txt || (dig && x.numero.replace(/\D/g, '').includes(dig)) || (x.classe + ' ' + x.assunto).toLowerCase().includes(txt)));
+      const cumpridos = new Map(S.cumpridos.map((k) => [k.numero, k]));
+      $('#m2Resumo').innerHTML = `${lista.length} processo(s)`;
+      $('#m2Lista').innerHTML = lista.length ? lista.slice(0, estadoM2.limite).map((x) => x.p
+        ? itemProcesso(x.p, cumpridos.get(x.numero)).replace('<div class="proc-fila">', `<div class="proc-classe">${esc(x.classe)}${x.assunto ? ' · ' + esc(x.assunto) : ''}</div><div class="proc-fila">`)
+        : `<div class="proc" data-n="${esc(x.numero)}">
+            <div class="proc-num">${esc(x.numero)}</div>
+            <div class="proc-meta"><span class="badge m2">Meta 2 · ${x.ano}</span><span>Andando no SAJ</span></div>
+            <div class="proc-classe">${esc(x.classe)}${x.assunto ? ' · ' + esc(x.assunto) : ''}</div>
+            <div class="proc-acoes"><button class="btn mini" data-acao="copiar">${ic('copiar')} Copiar</button></div>
+          </div>`).join('') + (lista.length > estadoM2.limite ? `<button class="btn secundario" data-acao="maisM2">Mostrar mais (${lista.length - estadoM2.limite})</button>` : '')
+        : '<div class="vazio">Nenhum processo com estes filtros. &#127881;</div>';
+    };
+    $('#m2Abas').addEventListener('click', (e) => {
+      const b = e.target.closest('.aba'); if (!b) return;
+      estadoM2.aba = b.dataset.a; estadoM2.limite = 60;
+      $$('#m2Abas .aba').forEach((x) => x.classList.toggle('on', x === b)); desenhar();
+    });
+    $('#m2Busca').addEventListener('input', (e) => { estadoM2.busca = e.target.value; desenhar(); });
+    if ($('#m2Meus')) $('#m2Meus').addEventListener('change', (e) => { estadoM2.meus = e.target.checked; desenhar(); });
+    $('#m2Lista').addEventListener('click', (e) => {
+      if (e.target.closest('[data-acao="maisM2"]')) { estadoM2.limite += 60; desenhar(); return; }
+      acaoProcesso(e);
+    });
+    redesenharM2 = desenhar;
+    desenhar();
+    animarNumeros($('#app'));
+  }
+
   // ======================= FILAS DE CUMPRIMENTO =======================
   const ORDEM_FAIXA = ['1 a 15 dias', '+ 15 dias', '+ 30 dias', '+ 60 dias', '+ 100 dias', '+ 120 dias', '+ 180 dias', '+ 365 dias'];
   const COR_FAIXA = { '1 a 15 dias': '#4d8dff', '+ 15 dias': '#7fb0ff', '+ 30 dias': '#e9c46a', '+ 60 dias': '#f4a259', '+ 100 dias': '#e5603e', '+ 120 dias': '#d43a3a', '+ 180 dias': '#b02a2a', '+ 365 dias': '#8a1c1c' };
@@ -662,17 +836,18 @@
       <div class="slot" data-tipo="${tipo}">
         <div class="slot-num">${num}</div>
         <div class="slot-txt"><b>${titulo}</b><small>${desc}</small>${info ? `<small class="ok-txt">${info}</small>` : ''}</div>
-        <label class="btn secundario slot-btn">${ic('enviar')} Escolher<input type="file" accept=".xlsx,.xls,.csv" data-tipo="${tipo}" hidden></label>
+        <label class="btn secundario slot-btn">${ic('enviar')} Escolher<input type="file" accept=".xlsx,.xls,.csv" data-tipo="${tipo}"${tipo === 'metacnj' ? ' multiple' : ''} hidden></label>
       </div>
       <div class="slot-previa" id="prev-${tipo}"></div>`;
   }
   function ligarSlots(depois) {
     $$('input[type=file][data-tipo]').forEach((inp) => inp.addEventListener('change', async (e) => {
-      const f = e.target.files[0]; const tipo = e.target.dataset.tipo; e.target.value = '';
+      const arqs = [...e.target.files]; const f = arqs[0]; const tipo = e.target.dataset.tipo; e.target.value = '';
       if (!f) return;
       const alvo = $('#prev-' + tipo);
       alvo.innerHTML = '<div class="carregando">Lendo planilha…</div>';
       try {
+        if (tipo === 'metacnj') return previaMetaCNJ(arqs, alvo, depois);
         const qual = await Parser.identificar(f);
         if (qual !== TIPO_ESPERADO[tipo]) {
           alvo.innerHTML = `<p class="alerta-txt">${qual ? `Este arquivo parece ser <b>${NOME_TIPO[qual]}</b>, não "${esc(tipo)}". Use o cartão certo.` : 'Não reconheci esta planilha. Envie o arquivo .xlsx como veio do SAJ Insights.'}</p>`;
@@ -683,6 +858,34 @@
         if (tipo === 'iad') return previaIAD(f, alvo, depois);
         return previaLista(f, tipo, alvo, depois);
       } catch (err) { alvo.innerHTML = `<p class="alerta-txt">${esc(err.message)}</p>`; }
+    }));
+  }
+  async function previaMetaCNJ(arqs, alvo, depois) {
+    const ant = S.meta2 || { resumo: {}, pendentes: [] };
+    const resumo = { unicas: { ...(ant.resumo.unicas || {}) }, mensais: { ...(ant.resumo.mensais || {}) }, nomes: { ...(ant.resumo.nomes || {}) } };
+    let pendentes = ant.pendentes || [], referencia = ant.referencia || null;
+    const lidos = [];
+    for (const f of arqs) {
+      const r = await Parser.lerMetaCNJ(f);
+      if (r.meta && r.meta !== 2) throw new Error(`"${f.name}" é da Meta ${r.meta}. Por enquanto o app acompanha a Meta 2 — exporte o painel com o filtro Meta = 2.`);
+      if (Object.keys(r.unicas).length) resumo.unicas = r.unicas;
+      Object.assign(resumo.mensais, r.mensais); Object.assign(resumo.nomes, r.nomes);
+      if (r.pendentes && (!referencia || r.referencia >= referencia)) { pendentes = r.pendentes; referencia = r.referencia; }
+      lidos.push(`${esc(f.name)}: ${r.tipo === 'unicas' ? 'Perguntas Únicas' : 'Perguntas Mensais (' + Object.keys(r.mensais).map((m) => m.split('-').reverse().join('/')).join(', ') + ')'}`);
+    }
+    const reg = { meta: 2, referencia, resumo, pendentes };
+    const c = calcMeta2(reg);
+    alvo.innerHTML = `
+      <div class="previa">
+        <div>${lidos.join('<br>')}</div>
+        <div>Universo: <b>${c.universo}</b> · Julgados: <b>${c.julgados}</b> · Alvo 80%: <b>${c.alvo}</b> · Cumprimento: <b>${c.pct.toFixed(2).replace('.', ',')}%</b></div>
+        <div>Pendentes (saldo): <b>${pendentes.length}</b>${referencia ? ` · ref. ${esc(referencia.split('-').reverse().join('/'))}` : ''}</div>
+        ${!Object.keys(resumo.unicas).length ? '<div class="alerta-txt">Falta a planilha "Perguntas Únicas" (P2.1 e P2.25) para calcular o percentual.</div>' : ''}
+        <button class="btn primario">${ic('check')} Gravar Meta 2</button>
+      </div>`;
+    $('.btn.primario', alvo).addEventListener('click', (ev) => UI.ocupado(ev.currentTarget, async () => {
+      await DB.salvarMetaCNJ(reg);
+      UI.toast('Meta 2 atualizada.', 'ok'); depois();
     }));
   }
   async function previaParados(f, alvo, depois) {
@@ -759,7 +962,7 @@
   async function telaGabinete() {
     UI.topo('Gabinete e Comandos', 'Conclusos e determinações', true);
     UI.render('<div class="carregando">Carregando…</div>');
-    await carregar('processos', 'cumpridos', 'comandos', 'usuarios');
+    await carregar('processos', 'cumpridos', 'comandos', 'usuarios', 'meta2');
     const aprovados = S.usuarios.filter((u) => u.status === 'aprovado');
     const n = consultaHash().get('n') || '';
 
@@ -804,7 +1007,7 @@
 
     $('#gFaixas').addEventListener('click', (e) => {
       const b = e.target.closest('.faixa'); if (!b) return;
-      estadoGab.faixa = b.dataset.f === '' ? null : parseInt(b.dataset.f, 10); desenharConclusos();
+      estadoGab.faixa = b.dataset.f === '' ? null : b.dataset.f === 'm2' ? 'm2' : parseInt(b.dataset.f, 10); desenharConclusos();
     });
     $('#gLista').addEventListener('click', acaoProcesso);
     $('#gAbas').addEventListener('click', (e) => {
@@ -838,11 +1041,12 @@
     const cont = {};
     for (const p of base) cont[p.faixa] = (cont[p.faixa] || 0) + 1;
     const faixas = [...new Set([...cfg.FAIXAS, ...base.map((p) => p.faixa)])].sort((a, b) => b - a);
-    $('#gFaixas').innerHTML = faixas.map((f) =>
+    const m2 = m2Mapa(), baseM2 = base.filter((p) => m2.has(p.numero));
+    $('#gFaixas').innerHTML = (S.meta2 ? `<button class="faixa m2${estadoGab.faixa === 'm2' ? ' on' : ''}" data-f="m2"><b>${baseM2.length}</b><small>Meta 2</small></button>` : '') + faixas.map((f) =>
       `<button class="faixa ${classeFaixa(f)}${estadoGab.faixa === f ? ' on' : ''}" data-f="${f}"><b>${cont[f] || 0}</b><small>${rotuloFaixa(f)}</small></button>`).join('');
-    if (estadoGab.faixa == null) { $('#gLista').innerHTML = '<p class="dica">Toque numa faixa para ver os processos conclusos há mais tempo.</p>'; return; }
+    if (estadoGab.faixa == null) { $('#gLista').innerHTML = `<p class="dica">Toque numa faixa para ver os processos conclusos há mais tempo.${S.meta2 ? ' <b>Meta 2</b> = processos antigos que contam para a meta do CNJ — priorize a sentença.' : ''}</p>`; return; }
     const cumpridos = new Map(S.cumpridos.map((c) => [c.numero, c]));
-    const lista = base.filter((p) => p.faixa === estadoGab.faixa);
+    const lista = estadoGab.faixa === 'm2' ? baseM2.sort((a, b) => m2.get(a.numero).ano - m2.get(b.numero).ano) : base.filter((p) => p.faixa === estadoGab.faixa);
     $('#gLista').innerHTML = lista.length ? lista.slice(0, 300).map((p) => itemProcesso(p, cumpridos.get(p.numero), true)).join('')
       : '<div class="vazio">Nenhum processo nesta faixa.</div>';
   }
@@ -992,7 +1196,7 @@
     if (!ehAdmin()) { location.hash = '#/'; return; }
     UI.topo('Administração', 'Perfis, base e QR Code', true);
     UI.render('<div class="carregando">Carregando…</div>');
-    await carregar('usuarios', 'importacoes', 'filas', 'meta');
+    await carregar('usuarios', 'importacoes', 'filas', 'meta', 'meta2');
     const pend = S.usuarios.filter((u) => u.status === 'pendente');
     const equipe = S.usuarios.filter((u) => u.status !== 'pendente');
     // Sempre o endereço oficial (se o app for aberto pelo arquivo do PC, o QR não aponta para o computador)
@@ -1020,6 +1224,7 @@
               S.filas ? `Última: ${UI.dataHora(S.filas.criado_em)} · ${S.filas.total} processos` : '')}
             ${slotHTML('iad', '3', 'IAD, Casos Novos e Baixados', 'Preenche de uma vez as Entradas (casos novos) e os Baixados da meta.',
               S.meta ? `Mês atual: ${S.meta.entradas} casos novos · ${S.meta.arquivados} baixados` : '')}
+            ${slotHTML('metacnj', '6', 'Metas CNJ · Meta 2', 'Painel "(PG) Metas CNJ": Perguntas Únicas e Perguntas Mensais (escolha os 2 arquivos juntos).', S.meta2 ? 'Última: ref. ' + esc((S.meta2.referencia || '').split('-').reverse().join('/')) + ' · ' + UI.dataHora(S.meta2.criado_em) : '')}
             ${slotHTML('baixados', '4', 'Baixados (lista)', 'Opcional, se não tiver a planilha IAD: conta os baixados.', '')}
             ${slotHTML('entradas', '5', 'Casos Novos (lista)', 'Opcional, se não tiver a planilha IAD: conta as entradas.', '')}
           </div>
@@ -1182,7 +1387,7 @@
   }
 
   // Transição entre telas: avança deslizando da direita, volta deslizando da esquerda
-  const ORDEM_TELAS = ['/', '/parados', '/filas', '/meta', '/gabinete', '/repasses', '/admin', '/conta'];
+  const ORDEM_TELAS = ['/', '/parados', '/filas', '/meta', '/meta2', '/gabinete', '/repasses', '/admin', '/conta'];
   let rotaAtual = null;
   function transicao(rota) {
     const app = document.getElementById('app');
@@ -1216,10 +1421,10 @@
       estadoRep.aba = 'para';
     }
 
-    UI.nav(['/', '/parados', '/filas', '/meta', '/gabinete', '/repasses'].includes(rota) ? rota : '');
+    UI.nav(rota === '/meta2' ? '/meta' : ['/', '/parados', '/filas', '/meta', '/gabinete', '/repasses'].includes(rota) ? rota : '');
     transicao(rota);
     const telas = {
-      '/': telaInicio, '/parados': telaParados, '/filas': telaFilas, '/meta': telaMeta, '/gabinete': telaGabinete,
+      '/': telaInicio, '/parados': telaParados, '/filas': telaFilas, '/meta2': telaMeta2, '/meta': telaMeta, '/gabinete': telaGabinete,
       '/repasses': telaRepasses, '/admin': telaAdmin, '/conta': telaConta
     };
     try { await (telas[rota] || telaInicio)(); }
