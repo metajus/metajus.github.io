@@ -520,3 +520,18 @@ svg.graf path[data-tip]:hover, svg.graf circle[data-tip]:hover { filter: brightn
   color: #ffe3a3; border-radius: 14px; padding: 12px 14px; margin: 0 0 14px; font-size: 14px; }
 .aviso-m2 .ic { flex: none; margin-top: 2px; }
 #m2Abas .aba small { opacity: .75; font-weight: 600; margin-left: 2px; }
+
+/* ---------- Processos de cada fila + conferência de audiências ---------- */
+.fila-procs { margin-top: 12px; border-top: 1px solid var(--borda); padding-top: 12px; cursor: default; }
+.fp-filtros { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+.fp-filtros input { grid-column: 1 / -1; }
+.fp-filtros select, .fp-filtros input { margin: 0; }
+.fila-procs .proc { margin-top: 8px; }
+.cartao.aud { border-color: rgba(229, 96, 62, .45); }
+.aud-pauta { margin-top: 12px; border-top: 1px dashed var(--borda); padding-top: 12px; }
+.badge.ok { background: rgba(12, 163, 12, .2); color: #7be07b; }
+.aud-pauta input[type=file] { display: none !important; }
+.aud-tit { margin: 12px 0 4px; font-size: 15px; }
+.aud-tit small, .aud-conf summary small { color: var(--suave); font-weight: 500; font-size: 12.5px; }
+.aud-conf { margin-top: 12px; }
+.aud-conf summary { cursor: pointer; font-weight: 700; }
