@@ -336,6 +336,61 @@
     throw new Error('Não encontrei as colunas "Pergunta" e "Processo" (relatório de Metas CNJ).');
   }
 
+
+  // --------------------------------------------------------
+  // Processos por fila (relatório "data" do Fluxo e Fila, nível processo)
+  //   n | Mês/Ano | Processo | Data da Entrada | Fluxo | Fila | Faixa de Dias | ... | Classe | Assunto
+  //   Um processo pode aparecer em mais de uma fila (uma linha por fila).
+  // --------------------------------------------------------
+  function mapaFilaProc(cab) {
+    const processo = acharCol(cab, (c) => c === 'processo' || c.startsWith('processo') || c.includes('numero do processo'));
+    const fila = acharCol(cab, (c) => c.startsWith('fila'));
+    if (processo < 0 || fila < 0) return null;
+    // o relatório de "sem movimentação" também tem fila, mas traz sequencial/localização
+    if (acharCol(cab, (c) => c.includes('sequencial')) >= 0) return null;
+    if (acharCol(cab, (c) => c.includes('cartorio') || c.includes('gabinete') || c.includes('localiza')) >= 0) return null;
+    return { processo, fila, fluxo: acharCol(cab, (c) => c.startsWith('fluxo')), faixa: acharCol(cab, (c) => c.includes('faixa')),
+             entrada: acharCol(cab, (c) => c.startsWith('data') && c.includes('entrada')),
+             mes: acharCol(cab, (c) => c.replace(/\s/g, '') === 'mes/ano'),
+             classe: acharCol(cab, (c) => c.startsWith('classe')), assunto: acharCol(cab, (c) => c.startsWith('assunto')) };
+  }
+  async function lerFilaProc(file) {
+    const abas = await lerArquivo(file, true);
+    for (const aba of abas) {
+      const cab = acharCabecalho(aba.linhas, mapaFilaProc);
+      if (!cab) continue;
+      const m = cab.mapa, vistos = new Set(), itens = [], ag = new Map();
+      let referencia = null;
+      const limpa = (v) => txt(v).replace(/^\d+\s*-\s*/, '').slice(0, 70);
+      for (let i = cab.indice + 1; i < aba.linhas.length; i++) {
+        const l = aba.linhas[i] || [];
+        const achou = String(l[m.processo] || '').match(RE_CNJ);
+        const fila = txt(l[m.fila]).slice(0, 120);
+        if (!achou || !fila) continue;
+        if (!referencia && m.mes >= 0) { const x = txt(l[m.mes]).match(/(\d{1,2})\/(\d{4})/); if (x) referencia = x[2] + '-' + x[1].padStart(2, '0'); }
+        const chave = achou[0] + '|' + fila;
+        if (vistos.has(chave)) continue;
+        vistos.add(chave);
+        const it = {
+          numero: achou[0], fila,
+          fluxo: m.fluxo >= 0 ? txt(l[m.fluxo]).slice(0, 120) : '',
+          faixa: m.faixa >= 0 ? txt(l[m.faixa]) : '',
+          entrada: m.entrada >= 0 ? dataISO(l[m.entrada]) : null,
+          classe: m.classe >= 0 ? limpa(l[m.classe]) : '',
+          assunto: m.assunto >= 0 ? limpa(l[m.assunto]) : ''
+        };
+        itens.push(it);
+        const k = it.fluxo + '|' + it.fila + '|' + it.faixa;
+        const g = ag.get(k) || { fluxo: it.fluxo, area: area(it.fluxo), fila: it.fila, faixa: it.faixa, qtd: 0 };
+        g.qtd++; ag.set(k, g);
+      }
+      if (!itens.length) continue;
+      return { itens, agregado: [...ag.values()], total: itens.length, referencia: referencia || referenciaDe(aba.linhas),
+               processos: new Set(itens.map((x) => x.numero)).size, aba: aba.nome };
+    }
+    throw new Error('Não encontrei as colunas "Processo" e "Fila" nesta planilha.');
+  }
+
   // Descobre qual relatório é, pelo cabeçalho
   async function identificar(file) {
     const abas = await lerArquivo(file, true);
@@ -343,6 +398,7 @@
       if (acharCabecalho(aba.linhas, mapaMetaCNJ)) return 'metacnj';
       if (acharCabecalho(aba.linhas, mapaIAD)) return 'iad';
       if (acharCabecalho(aba.linhas, mapaFilas)) return 'filas';
+      if (acharCabecalho(aba.linhas, mapaFilaProc)) return 'filasproc';
       if (acharCabecalho(aba.linhas, mapaParados)) return 'parados';
       if (acharCabecalho(aba.linhas, mapaListaMes)) return 'lista';
     }
@@ -398,5 +454,5 @@
     throw new Error('Não encontrei as colunas "Data" e "Tipo" (Entrada/Arquivamento) na planilha.');
   }
 
-  window.Parser = { lerMetaCNJ, lerParados, lerMovimentacao, lerFilas, lerListaMes, lerIAD, identificar, area, RE_CNJ, faixaDeDias };
+  window.Parser = { lerFilaProc, lerMetaCNJ, lerParados, lerMovimentacao, lerFilas, lerListaMes, lerIAD, identificar, area, RE_CNJ, faixaDeDias };
 })();

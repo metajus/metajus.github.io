@@ -743,7 +743,7 @@
   const ORDEM_FAIXA = ['1 a 15 dias', '+ 15 dias', '+ 30 dias', '+ 60 dias', '+ 100 dias', '+ 120 dias', '+ 180 dias', '+ 365 dias'];
   const COR_FAIXA = { '1 a 15 dias': '#4d8dff', '+ 15 dias': '#7fb0ff', '+ 30 dias': '#e9c46a', '+ 60 dias': '#f4a259', '+ 100 dias': '#e5603e', '+ 120 dias': '#d43a3a', '+ 180 dias': '#b02a2a', '+ 365 dias': '#8a1c1c' };
   const ordFaixa = (f) => { const i = ORDEM_FAIXA.indexOf(f); return i < 0 ? 99 : i; };
-  const estadoFilas = { area: 'Todas', aberta: null };
+  const estadoFilas = { area: 'Todas', aberta: null, cache: {}, seq: 'todos', faixa: '', busca: '', limite: 50 };
 
   async function telaFilas() {
     UI.topo('Filas de Cumprimento', 'Fluxo e Fila do SAJ', true);
@@ -760,7 +760,7 @@
         ${UI.ajuda('filas', 'Como ler esta tela', [
           'Cada cartão é uma <b>fila do SAJ</b>, da maior para a menor, com o total de processos parados nela.',
           'A barra colorida mostra <b>há quanto tempo</b> estão na fila: azul = recente, amarelo/laranja = atenção, vermelho = mais de 100 dias.',
-          'Use as abas para ver só <b>Cível</b> ou <b>Criminal</b>. Toque num cartão para ver os números e abrir os processos daquela fila.'
+          'Use as abas para ver só <b>Cível</b> ou <b>Criminal</b>. Toque num cartão para ver os <b>processos daquela fila</b>, filtrar pelo seu sequencial e copiar o número.', 'A <b>Conferência de audiências</b> mostra quem está em Ag. Designação de Audiência mas já foi pautado — dá para conferir também com a pauta em PDF.'
         ])}
         <div class="cartao resumo-filas">
           <div class="numeros">
@@ -771,6 +771,7 @@
           <p class="dica">Referência ${snap.referencia ? esc(snap.referencia.split('-').reverse().join('/')) : '—'} · importado em ${UI.dataHora(snap.criado_em)}</p>
           <div class="legenda">${ORDEM_FAIXA.slice(0, 5).map((f) => `<span><i style="background:${COR_FAIXA[f]}"></i>${f}</span>`).join('')}</div>
         </div>
+        <div id="fAudiencia"></div>
         <div class="abas" id="fAbas">${['Todas', 'Cível', 'Criminal', 'Outros'].map((a) => `<button class="aba${estadoFilas.area === a ? ' on' : ''}" data-a="${a}">${a}</button>`).join('')}</div>
         <div id="fLista" class="lista filas"></div>
       </section>`);
@@ -780,10 +781,12 @@
       $$('#fAbas .aba').forEach((x) => x.classList.toggle('on', x === b)); desenharFilas();
     });
     $('#fLista').addEventListener('click', (e) => {
-      const card = e.target.closest('.fila-card'); if (!card || e.target.closest('a')) return;
+      const card = e.target.closest('.fila-card'); if (!card || e.target.closest('a') || e.target.closest('.fila-procs')) return;
+      estadoFilas.limite = 50;
       estadoFilas.aberta = estadoFilas.aberta === card.dataset.fila ? null : card.dataset.fila; desenharFilas();
     });
     desenharFilas();
+    montarConferenciaAudiencia();
   }
 
   function desenharFilas() {
@@ -821,16 +824,191 @@
           ${aberta ? `
           <div class="fila-detalhe">
             ${faixas.map((f) => `<div><i style="background:${COR_FAIXA[f] || '#888'}"></i>${esc(f)}<b>${g.faixas[f]}</b></div>`).join('')}
-            ${nProc ? `<a class="btn primario" href="#/parados?fila=${encodeURIComponent(g.fila)}">${ic('relogio')} Ver os ${nProc} processos parados desta fila</a>`
-                    : '<p class="dica">Nenhum processo desta fila no relatório de "sem movimentação" (só entram lá os parados há mais de 30 dias).</p>'}
+            <div class="fila-procs" id="fProcs" data-nproc="${nProc}"><div class="carregando">Carregando processos…</div></div>
           </div>` : ''}
         </div>`;
     }).join('') || '<div class="vazio">Nenhuma fila nesta área.</div>';
+    if (estadoFilas.aberta && $('#fProcs')) carregarProcsFila(estadoFilas.aberta);
+  }
+
+  async function procsDasFilas(filas) {
+    const falta = filas.filter((f) => !estadoFilas.cache[f]);
+    if (falta.length) {
+      const rows = await DB.listarFilaProcessos(falta);
+      falta.forEach((f) => { estadoFilas.cache[f] = []; });
+      rows.forEach((r) => estadoFilas.cache[r.fila].push(r));
+    }
+    return filas.flatMap((f) => estadoFilas.cache[f]);
+  }
+  const dataBR = (iso) => iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—';
+
+  async function carregarProcsFila(fila) {
+    const alvo = $('#fProcs'); if (!alvo) return;
+    let rows;
+    try { rows = await procsDasFilas([fila]); } catch (e) { rows = []; }
+    if (estadoFilas.aberta !== fila || !$('#fProcs')) return;
+    if (!rows.length) {
+      const n = +alvo.dataset.nproc;
+      alvo.innerHTML = n ? `<a class="btn primario" href="#/parados?fila=${encodeURIComponent(fila)}">${ic('relogio')} Ver os ${n} processos parados desta fila</a>`
+        : `<p class="dica">A lista de processos desta fila ainda não foi importada.${ehAdmin() ? ' Em Administração › Fluxo e Fila, envie a planilha que tem a coluna <b>Processo</b>.' : ''}</p>`;
+      return;
+    }
+    const acervo = new Map(S.processos.map((p) => [p.numero, p]));
+    const m2 = m2Mapa();
+    const meus = new Set(S.perfil.sequenciais || []);
+    const faixas = [...new Set(rows.map((r) => r.faixa))].sort((a, b) => ordFaixa(a) - ordFaixa(b));
+    const seqDe = (n) => { const p = acervo.get(n); return p && p.sequencial != null ? p.sequencial : null; };
+    const desenhar = () => {
+      const st = estadoFilas, dig = st.busca.replace(/\D/g, ''), t = st.busca.trim().toLowerCase();
+      const lista = rows.filter((r) => {
+        const sq = seqDe(r.numero);
+        if (st.seq === 'meus' && !meus.has(sq)) return false;
+        if (st.seq === 'sem' && sq != null) return false;
+        if (/^\d$/.test(st.seq) && sq !== +st.seq) return false;
+        if (st.faixa && r.faixa !== st.faixa) return false;
+        if (t && !((dig && r.numero.replace(/\D/g, '').includes(dig)) || (r.classe + ' ' + r.assunto).toLowerCase().includes(t))) return false;
+        return true;
+      });
+      $('#fpResumo').textContent = `${lista.length} de ${rows.length} processo(s) · mais antigos na fila primeiro`;
+      $('#fpLista').innerHTML = lista.slice(0, st.limite).map((r) => {
+        const sq = seqDe(r.numero), p = acervo.get(r.numero);
+        return `<div class="proc" data-n="${esc(r.numero)}">
+          <div class="proc-num">${esc(r.numero)}</div>
+          <div class="proc-meta">
+            <span class="badge" style="background:${COR_FAIXA[r.faixa] || '#556'};color:#0b1020">${esc(r.faixa || '—')}</span>
+            <span>na fila desde ${dataBR(r.entrada)}</span>
+            <span>Seq. ${sq != null ? sq : '—'}</span>
+            ${p && p.local ? `<span>${esc(p.local)}</span>` : ''}
+            ${m2.has(r.numero) ? `<span class="badge m2">Meta 2 · ${m2.get(r.numero).ano}</span>` : ''}
+          </div>
+          ${r.classe ? `<div class="proc-classe">${esc(r.classe)}${r.assunto ? ' · ' + esc(r.assunto) : ''}</div>` : ''}
+          <div class="proc-acoes"><button class="btn mini" data-acao="copiar">${ic('copiar')} Copiar</button></div>
+        </div>`;
+      }).join('') + (lista.length > st.limite ? `<button class="btn secundario largo" data-acao="maisFila">Mostrar mais (${lista.length - st.limite})</button>` : '')
+        || '<div class="vazio">Nenhum processo com estes filtros.</div>';
+    };
+    alvo.innerHTML = `
+      <div class="fp-filtros">
+        <select id="fpSeq" aria-label="Sequencial">
+          <option value="todos">Todos os sequenciais</option>
+          ${meus.size ? '<option value="meus">Meus finais</option>' : ''}
+          ${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<option value="${n}">Final ${n}</option>`).join('')}
+          <option value="sem">Sem sequencial</option>
+        </select>
+        <select id="fpFaixa" aria-label="Tempo na fila"><option value="">Todo o tempo</option>${faixas.map((f) => `<option>${esc(f)}</option>`).join('')}</select>
+        <input type="search" id="fpBusca" placeholder="Buscar número ou classe…">
+      </div>
+      <p class="dica">O sequencial vem do relatório de "sem movimentação"; processos que não estão nele aparecem como "Seq. —".</p>
+      <div id="fpResumo" class="resumo-lista"></div>
+      <div id="fpLista" class="lista"></div>`;
+    $('#fpSeq').value = estadoFilas.seq; $('#fpFaixa').value = estadoFilas.faixa; $('#fpBusca').value = estadoFilas.busca;
+    $('#fpSeq').addEventListener('change', (e) => { estadoFilas.seq = e.target.value; estadoFilas.limite = 50; desenhar(); });
+    $('#fpFaixa').addEventListener('change', (e) => { estadoFilas.faixa = e.target.value; estadoFilas.limite = 50; desenhar(); });
+    $('#fpBusca').addEventListener('input', (e) => { estadoFilas.busca = e.target.value; desenhar(); });
+    alvo.addEventListener('click', (e) => {
+      if (e.target.closest('[data-acao="maisFila"]')) { estadoFilas.limite += 100; desenhar(); return; }
+      if (e.target.closest('[data-acao="copiar"]')) acaoProcesso(e);
+    });
+    desenhar();
+  }
+
+  // ---------- Conferência de audiências ----------
+  const RE_DESIGNA = /designa[çc][ãa]o de audi/i, RE_DEPOIS = /(cumprimento de atos para audi|realiza[çc][ãa]o de audi)/i;
+  const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/build/';
+  // Lê a pauta (PDF do SAJ) no próprio aparelho: devolve Map numero -> {data, tipo}. Nada é gravado.
+  async function numerosDoPdf(file) {
+    const pdfjs = await import(window.__PDFJS || PDFJS + 'pdf.min.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = window.__PDFJS_WORKER || PDFJS + 'pdf.worker.min.mjs';
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    const achados = new Map();
+    const RE = new RegExp('(\\d{2}/\\d{2}/\\d{2,4})\\s+(\\d{2}:\\d{2})\\s*:\\s*([^:]*?)\\s+Processo|(' + Parser.RE_CNJ.source + ')', 'g');
+    let atual = null;
+    for (let i = 1; i <= doc.numPages; i++) {
+      const pg = await doc.getPage(i);
+      const t = (await pg.getTextContent()).items.map((x) => x.str).join(' ').replace(/\s+/g, ' ');
+      let m;
+      RE.lastIndex = 0;
+      while ((m = RE.exec(t))) {
+        if (m[1]) atual = { data: m[1] + ' ' + m[2], tipo: m[3].trim().slice(0, 60) };
+        else { const n = m[4].slice(0, 25); if (!achados.has(n)) achados.set(n, atual || { data: '', tipo: '' }); }
+      }
+    }
+    return achados;
+  }
+  async function montarConferenciaAudiencia() {
+    const alvo = $('#fAudiencia'); if (!alvo || !S.filas) return;
+    const nomes = [...new Set(S.filas.itens.map((x) => x.fila))];
+    const fD = nomes.filter((n) => RE_DESIGNA.test(n)), fO = nomes.filter((n) => RE_DEPOIS.test(n));
+    if (!fD.length) return;
+    let rows = [];
+    try { rows = await procsDasFilas([...fD, ...fO]); } catch (e) { /* sem dados */ }
+    if (!$('#fAudiencia')) return;
+    if (!rows.length) {
+      alvo.innerHTML = `<div class="cartao aud"><h3>${ic('balanca')} Conferência de audiências</h3><p class="dica">Para comparar as filas de audiência, o administrador precisa importar a planilha do Fluxo e Fila com a coluna <b>Processo</b>.</p></div>`;
+      return;
+    }
+    const desig = new Map(), depois = new Map();
+    rows.forEach((r) => {
+      if (fD.includes(r.fila)) desig.set(r.numero, r);
+      else (depois.get(r.numero) || depois.set(r.numero, []).get(r.numero)).push(r);
+    });
+    const dupl = [...desig.keys()].filter((n) => depois.has(n));
+    const novaAud = (n) => depois.get(n).every((r) => (r.entrada || '') < (desig.get(n).entrada || ''));
+    const limpar = dupl.filter((n) => !novaAud(n)), conferir = dupl.filter(novaAud);
+    const nomeCurto = (f) => f.replace(/^\d+\s*-\s*/, '');
+    const item = (n, extra) => `<div class="proc" data-n="${esc(n)}">
+        <div class="proc-num">${esc(n)}</div>
+        <div class="proc-meta"><span class="badge f365">Ag. Designação desde ${dataBR(desig.get(n).entrada)}</span>${extra}</div>
+        ${desig.get(n).classe ? `<div class="proc-classe">${esc(desig.get(n).classe)}</div>` : ''}
+        <div class="proc-acoes"><button class="btn mini" data-acao="copiar">${ic('copiar')} Copiar</button></div>
+      </div>`;
+    const outras = (n) => depois.get(n).map((r) => `<span class="badge">${esc(nomeCurto(r.fila))} desde ${dataBR(r.entrada)}</span>`).join('');
+    alvo.innerHTML = `
+      <div class="cartao aud">
+        <div class="cartao-cab"><h3>${ic('balanca')} Conferência de audiências</h3><span class="selo ${limpar.length ? 'alerta' : 'ok'}">${limpar.length ? limpar.length + ' para limpar' : 'Nada para limpar'}</span></div>
+        <p class="dica">Quando a audiência é pautada, o processo sai de <b>${esc(nomeCurto(fD[0]))}</b> (${desig.size} processos hoje) e vai para <b>${esc(fO.map(nomeCurto).join(' / ') || 'a fila de atos de audiência')}</b>. O app cruza as duas listas:</p>
+        <h4 class="aud-tit">Para limpar <small>(entrou na fila de audiência depois da designação — já foi pautado)</small></h4>
+        <div class="lista">${limpar.length ? limpar.map((n) => item(n, outras(n))).join('') : '<div class="vazio">Nenhum processo para limpar. &#127881;</div>'}</div>
+        ${conferir.length ? `<details class="aud-conf"><summary>Conferir ${conferir.length} processo(s) <small>(voltaram para designação depois da audiência anterior — pode ser nova audiência a marcar)</small></summary>
+          <div class="lista">${conferir.map((n) => item(n, outras(n))).join('')}</div></details>` : ''}
+        <div class="aud-pauta">
+          <label class="btn secundario largo">${ic('enviar')} Conferir também com a pauta (PDF)<input type="file" accept="application/pdf,.pdf" id="audPdf" hidden></label>
+          <p class="dica">O PDF é lido só no seu aparelho: o app pega apenas os números dos processos e não guarda a pauta.</p>
+          <div id="audPautaRes"></div>
+        </div>
+      </div>`;
+    alvo.addEventListener('click', (e) => { if (e.target.closest('[data-acao="copiar"]')) acaoProcesso(e); });
+    $('#audPdf').addEventListener('change', async (e) => {
+      const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      const res = $('#audPautaRes');
+      res.innerHTML = '<div class="carregando">Lendo a pauta…</div>';
+      try {
+        const nums = await numerosDoPdf(f);
+        const naPauta = [...desig.keys()].filter((n) => nums.has(n));
+        res.innerHTML = `<p class="resumo-meta">Encontrei <b>${nums.size}</b> processo(s) na pauta. <b>${naPauta.length}</b> deles ainda estão em Ag. Designação de Audiência — a audiência já está marcada, então podem sair dessa fila.</p>
+          <div class="lista">${naPauta.map((n) => { const a = nums.get(n); return item(n, `<span class="badge ok">Pauta: ${esc(a.data || 'marcada')}${a.tipo ? ' · ' + esc(a.tipo) : ''}</span>`); }).join('')}</div>
+          <div id="audFora"></div>`;
+        const fora = [...nums.keys()].filter((n) => !desig.has(n) && !depois.has(n));
+        if (fora.length) {
+          const onde = new Map();
+          (await DB.filasDosNumeros(fora)).forEach((r) => (onde.get(r.numero) || onde.set(r.numero, []).get(r.numero)).push(r));
+          const pauta = (n) => { const a = nums.get(n); return `<span class="badge ok">Pauta: ${esc(a.data || 'marcada')}${a.tipo ? ' · ' + esc(a.tipo) : ''}</span>`; };
+          $('#audFora').innerHTML = `<details class="aud-conf" open><summary>${fora.length} processo(s) da pauta fora das filas de audiência <small>(audiência marcada, mas o processo não está em "Ag. Cumprimento de Atos para Audiência" — confira se as intimações foram feitas)</small></summary>
+            <div class="lista">${fora.map((n) => `<div class="proc" data-n="${esc(n)}">
+              <div class="proc-num">${esc(n)}</div>
+              <div class="proc-meta">${pauta(n)}${(onde.get(n) || []).map((r) => `<span class="badge">${esc(nomeCurto(r.fila))}</span>`).join('') || '<span class="badge f120">Não aparece em nenhuma fila</span>'}</div>
+              <div class="proc-acoes"><button class="btn mini" data-acao="copiar">${ic('copiar')} Copiar</button></div>
+            </div>`).join('')}</div></details>`;
+        }
+      } catch (err) {
+        res.innerHTML = `<p class="alerta-txt">Não consegui ler este PDF (${esc(err.message)}). Se a pauta for uma imagem escaneada, o app não consegue extrair os números.</p>`;
+      }
+    });
   }
 
   // ======================= IMPORTAÇÃO (cartões de arquivo) =======================
   const TIPO_ESPERADO = { parados: 'parados', filas: 'filas', iad: 'iad', baixados: 'lista', entradas: 'lista' };
-  const NOME_TIPO = { parados: 'Processos sem movimentação', filas: 'Fluxo e Fila', iad: 'IAD (Casos Novos e Baixados)', lista: 'lista de processos do mês (Baixados ou Casos Novos)' };
+  const NOME_TIPO = { filasproc: 'Fluxo e Fila (processos por fila)', parados: 'Processos sem movimentação', filas: 'Fluxo e Fila', iad: 'IAD (Casos Novos e Baixados)', lista: 'lista de processos do mês (Baixados ou Casos Novos)' };
   function slotHTML(tipo, num, titulo, desc, info) {
     return `
       <div class="slot" data-tipo="${tipo}">
@@ -849,6 +1027,7 @@
       try {
         if (tipo === 'metacnj') return previaMetaCNJ(arqs, alvo, depois);
         const qual = await Parser.identificar(f);
+        if (tipo === 'filas' && qual === 'filasproc') return previaFilasProc(f, alvo, depois);
         if (qual !== TIPO_ESPERADO[tipo]) {
           alvo.innerHTML = `<p class="alerta-txt">${qual ? `Este arquivo parece ser <b>${NOME_TIPO[qual]}</b>, não "${esc(tipo)}". Use o cartão certo.` : 'Não reconheci esta planilha. Envie o arquivo .xlsx como veio do SAJ Insights.'}</p>`;
           return;
@@ -906,6 +1085,25 @@
     $('.btn.primario', alvo).addEventListener('click', (ev) => UI.ocupado(ev.currentTarget, async () => {
       const n = await DB.substituirAcervo(res.itens, r);
       UI.toast(`Base atualizada: ${n} processos.`, 'ok'); depois();
+    }));
+  }
+  async function previaFilasProc(f, alvo, depois) {
+    const r = await Parser.lerFilaProc(f);
+    const porFila = {};
+    for (const x of r.itens) porFila[x.fila] = (porFila[x.fila] || 0) + 1;
+    const top = Object.entries(porFila).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    alvo.innerHTML = `
+      <div class="previa">
+        <div><b>${r.total.toLocaleString('pt-BR')}</b> registros de <b>${r.processos.toLocaleString('pt-BR')}</b> processos em <b>${Object.keys(porFila).length}</b> filas${r.referencia ? ` (ref. ${esc(r.referencia.split('-').reverse().join('/'))})` : ''}</div>
+        <div class="dica">Maiores filas: ${top.map(([k, v]) => `${esc(k)} (${v})`).join(' · ')}</div>
+        <div class="dica">Um processo pode estar em mais de uma fila ao mesmo tempo. Ao gravar, cada fila passa a mostrar a lista dos seus processos.</div>
+        <button class="btn primario">${ic('check')} Gravar filas e processos</button>
+      </div>`;
+    $('.btn.primario', alvo).addEventListener('click', (ev) => UI.ocupado(ev.currentTarget, async () => {
+      const bt = ev.currentTarget;
+      await DB.salvarFilasProcessos(r.itens, r.agregado, r.total, r.referencia, (k, n) => { bt.lastChild.textContent = ` Gravando ${k}/${n}…`; });
+      estadoFilas.cache = {};
+      UI.toast('Filas e processos atualizados.', 'ok'); depois();
     }));
   }
   async function previaFilas(f, alvo, depois) {
@@ -1220,7 +1418,7 @@
           <div class="slots">
             ${slotHTML('parados', '1', 'Processos sem movimentação', 'Lista com Faixa de Dias, Processo, Fila, Cartório/Gabinete e Sequencial.',
               S.importacoes[0] ? `Última: ${UI.dataHora(S.importacoes[0].criado_em)} · ${S.importacoes[0].total} processos` : '')}
-            ${slotHTML('filas', '2', 'Fluxo e Fila', 'Resumo das filas de cumprimento (só quantidades).',
+            ${slotHTML('filas', '2', 'Fluxo e Fila', 'Use a planilha com a coluna <b>Processo</b> (data.xlsx do Fluxo e Fila): mostra os processos de cada fila. O resumo só com quantidades também é aceito.',
               S.filas ? `Última: ${UI.dataHora(S.filas.criado_em)} · ${S.filas.total} processos` : '')}
             ${slotHTML('iad', '3', 'IAD, Casos Novos e Baixados', 'Preenche de uma vez as Entradas (casos novos) e os Baixados da meta.',
               S.meta ? `Mês atual: ${S.meta.entradas} casos novos · ${S.meta.arquivados} baixados` : '')}

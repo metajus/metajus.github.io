@@ -122,6 +122,30 @@
       async salvarMetaCNJ(reg) {
         ok(await sb.from('metas_cnj').insert(reg));
       },
+      async salvarFilasProcessos(itens, agregado, total, referencia, progresso) {
+        const T = 1500, partes = Math.max(1, Math.ceil(itens.length / T));
+        for (let k = 0; k < partes; k++) {
+          const ultima = k === partes - 1;
+          ok(await sb.rpc('substituir_filas_processos', { itens: itens.slice(k * T, (k + 1) * T), parte: k,
+            agregado: ultima ? agregado : null, total, referencia }));
+          if (progresso) progresso(k + 1, partes);
+        }
+        return itens.length;
+      },
+      async filasDosNumeros(nums) {
+        const out = [];
+        for (let k = 0; k < nums.length; k += 150) out.push(...ok(await sb.from('fila_processos').select('numero,fila,entrada').in('numero', nums.slice(k, k + 150))));
+        return out;
+      },
+      async listarFilaProcessos(filas) {
+        const out = [];
+        for (let de = 0; ; de += 1000) {
+          const r = ok(await sb.from('fila_processos').select('numero,fila,fluxo,faixa,entrada,classe,assunto')
+            .in('fila', filas).order('entrada', { ascending: true }).range(de, de + 999));
+          out.push(...r); if (r.length < 1000) break;
+        }
+        return out;
+      },
       async ultimaFila() {
         return ok(await sb.from('filas_snapshots').select('*').order('criado_em', { ascending: false }).limit(1).maybeSingle());
       },
@@ -267,6 +291,14 @@
         const u = exigeAdmin();
         (st.metasCnj = st.metasCnj || []).push({ id: st.seq++, criado_em: agora(), usuario_id: u.id, ...reg }); salvar();
       },
+      async salvarFilasProcessos(itens, agregado, total, referencia) {
+        const u = exigeAdmin();
+        st.filaProc = itens;
+        st.filas = { id: st.seq++, criado_em: agora(), itens: agregado, total, referencia, usuario_id: u.id }; salvar();
+        return itens.length;
+      },
+      async filasDosNumeros(nums) { exigeAprovado(); return copia((st.filaProc || []).filter((x) => nums.includes(x.numero))); },
+      async listarFilaProcessos(filas) { exigeAprovado(); return copia((st.filaProc || []).filter((x) => filas.includes(x.fila))).sort((a, b) => String(a.entrada).localeCompare(String(b.entrada))); },
       async ultimaFila() { exigeAprovado(); return st.filas ? copia(st.filas) : null; },
       async salvarFilas(itens, total, referencia) {
         const u = exigeAdmin();
