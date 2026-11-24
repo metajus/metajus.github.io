@@ -5,6 +5,7 @@
 //  #/meta       2. Entradas e Meta do Mês (Meta = Entradas + 1)
 //  #/gabinete   4. Painel do Gabinete e Comandos
 //  #/repasses   5. Repasse de Diligências
+//  #/tarefas    Listas de cumprimento (Corregedoria, chefia) por sequencial
 //  #/admin      3. Perfis, aprovações, QR Code e atualização da base
 //  #/conta      Minha conta
 // ============================================================
@@ -15,7 +16,7 @@
 
   const S = {
     perfil: null, usuarios: [], processos: [], cumpridos: [], importacoes: [],
-    comandos: [], repasses: [], meta: null, filas: null, meta2: null
+    comandos: [], repasses: [], meta: null, filas: null, meta2: null, tarefas: null
   };
   const estadoParadosInicial = () => ({ faixa: null, eAcima: false, local: null, seqs: null, fila: '', busca: '', limite: 200, ocultarCumpridos: false, soMeta2: false });
   let estadoParados = estadoParadosInicial();
@@ -41,7 +42,8 @@
       repasses: () => DB.listarRepasses().then((v) => (S.repasses = v)),
       meta: () => DB.obterMeta(mesAtual()).then((v) => (S.meta = v)),
       filas: () => DB.ultimaFila().then((v) => (S.filas = v)),
-      meta2: () => DB.ultimaMetaCNJ(2).then((v) => { S.meta2 = v; m2Cache = null; }).catch(() => (S.meta2 = null))
+      meta2: () => DB.ultimaMetaCNJ(2).then((v) => { S.meta2 = v; m2Cache = null; }).catch(() => (S.meta2 = null)),
+      tarefas: () => DB.listarListasTarefas().then((v) => (S.tarefas = v)).catch(() => (S.tarefas = null))
     };
     await Promise.all(quais.map((q) => tarefas[q]()));
   }
@@ -149,7 +151,8 @@
   async function telaInicio() {
     UI.topo('MetaJus', S.perfil.nome.split(' ')[0] + ' · ' + S.perfil.setor);
     UI.render('<div class="carregando">Carregando painel…</div>');
-    await carregar('processos', 'cumpridos', 'meta', 'comandos', 'repasses', 'importacoes', 'usuarios', 'meta2');
+    await carregar('processos', 'cumpridos', 'meta', 'comandos', 'repasses', 'importacoes', 'usuarios', 'meta2', 'tarefas');
+    const tar = minhasTarefas(S.tarefas);
     const m2c = calcMeta2(S.meta2);
     const m2meus = (() => { const m2 = m2Mapa(); const seqs = new Set(S.perfil.sequenciais || []); return S.processos.filter((p) => m2.has(p.numero) && seqs.has(p.sequencial) && (S.perfil.setor === 'Híbrido' || p.local === S.perfil.setor)).length; })();
 
@@ -190,6 +193,7 @@
           <a class="modulo" href="#/filas"><span class="mod-ic">${ic('lista')}</span><b>Filas de Cumprimento</b><small>Onde os processos estão parados no SAJ</small></a>
           <a class="modulo" href="#/meta"><span class="mod-ic">${ic('grafico')}</span><b>Painel e Meta</b><small>Gráficos da meta, evolução e acervo</small></a>
           <a class="modulo m2" href="#/meta2"><span class="mod-ic">${ic('alvo')}</span><b>Meta 2 · CNJ</b><small>${m2c ? `${Graficos.fmt(Math.round(m2c.pct * 10) / 10)}% · ${m2c.saldo} antigos pendentes` : 'Processos mais antigos'}</small>${m2meus ? `<span class="contador">${m2meus}</span>` : ''}</a>
+          <a class="modulo tar" href="#/tarefas"><span class="mod-ic">${ic('prancheta')}</span><b>Listas de Cumprimento</b><small>${tar.listas ? `${tar.listas} lista(s) da Corregedoria e chefia` : 'Pedidos da Corregedoria e da chefia'}</small>${tar.meus ? `<span class="contador">${tar.meus}</span>` : ''}</a>
           <a class="modulo" href="#/gabinete"><span class="mod-ic">${ic('balanca')}</span><b>Gabinete e Comandos</b><small>Conclusos e determinações</small>${av.comandos.length ? `<span class="contador">${av.comandos.length}</span>` : ''}</a>
           <a class="modulo" href="#/repasses"><span class="mod-ic">${ic('setas')}</span><b>Repasse de Diligências</b><small>SISBAJUD, RENAJUD, ofícios…</small>${av.repasses.length ? `<span class="contador">${av.repasses.length}</span>` : ''}</a>
           ${ehAdmin() ? `<a class="modulo admin" href="#/admin"><span class="mod-ic">${ic('cadeado')}</span><b>Administração</b><small>Aprovar colegas, planilha e QR Code</small>${pendentesCad ? `<span class="contador">${pendentesCad}</span>` : ''}</a>` : ''}
@@ -738,6 +742,398 @@
     desenhar();
     animarNumeros($('#app'));
   }
+
+  // ======================= LISTAS DE CUMPRIMENTO (Corregedoria, chefia…) =======================
+  //  #/tarefas          todas as listas, com o disco de andamento de cada uma
+  //  #/tarefas?id=N     a lista aberta: processos por final, marcar Feito/Pautada
+  const TIPOS_AUD = ['Conciliação', 'Instrução e Julgamento', 'Preliminar', 'Júri', 'Outra'];
+  const COR_TAR = { feito: '#0ca30c', tipo: '#3987e5', falta: '#5b6680' };
+  let estadoTar = { id: null, ver: 'falta', seq: 'meus', area: 'Todas', busca: '', limite: 40 };
+  let tarRecarregar = null;
+
+  const ehAud = (l) => l && l.tipo === 'audiencia';
+  const verboFeito = (l) => ehAud(l) ? 'Pautada' : 'Cumprido';
+  function diasAte(iso) {
+    if (!iso) return null;
+    const [a, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+    const h = new Date(); h.setHours(0, 0, 0, 0);
+    return Math.round((new Date(a, m - 1, d) - h) / 86400000);
+  }
+  function textoPrazo(iso) {
+    const n = diasAte(iso);
+    if (n == null) return '';
+    if (n < 0) return `<span class="alerta-txt">prazo vencido em ${dataBR(iso)}</span>`;
+    if (n === 0) return '<span class="alerta-txt">prazo termina hoje</span>';
+    return `prazo ${dataBR(iso)} · <b>${n === 1 ? 'falta 1 dia' : 'faltam ' + n + ' dias'}</b>`;
+  }
+  // Soma o resumo (lista_id, sequencial, status, com_tipo, qtd) com filtro opcional de finais
+  function contaTar(linhas, filtroSeq) {
+    const c = { total: 0, feitos: 0, tipo: 0, falta: 0 };
+    linhas.forEach((r) => {
+      if (filtroSeq && !filtroSeq(r.sequencial)) return;
+      c.total += r.qtd;
+      if (r.status === 'feito') c.feitos += r.qtd; else if (r.com_tipo) c.tipo += r.qtd; else c.falta += r.qtd;
+    });
+    c.pend = c.total - c.feitos;
+    c.pct = c.total ? Math.round(c.feitos / c.total * 100) : 0;
+    c.pctTxt = (c.feitos && c.pct === 0 ? '<1' : c.feitos < c.total && c.pct === 100 ? '99' : c.pct) + '%';
+    return c;
+  }
+  function segsTar(c, aud) {
+    return aud
+      ? [{ rotulo: 'Pautadas', valor: c.feitos, cor: COR_TAR.feito }, { rotulo: 'Tipo já identificado', valor: c.tipo, cor: COR_TAR.tipo }, { rotulo: 'Falta abrir', valor: c.falta, cor: COR_TAR.falta }]
+      : [{ rotulo: 'Cumpridos', valor: c.feitos, cor: COR_TAR.feito }, { rotulo: 'Falta cumprir', valor: c.tipo + c.falta, cor: COR_TAR.falta }];
+  }
+  const resumoDeItens = (itens) => {
+    const m = new Map();
+    itens.forEach((x) => {
+      const k = x.sequencial + '|' + x.status + '|' + !!x.aud_tipo;
+      const r = m.get(k) || { sequencial: x.sequencial, status: x.status, com_tipo: !!x.aud_tipo, qtd: 0 };
+      r.qtd++; m.set(k, r);
+    });
+    return [...m.values()];
+  };
+  // Pendentes dos meus finais em listas abertas (para o bloco do Início)
+  function minhasTarefas(t) {
+    if (!t) return { listas: 0, meus: 0 };
+    const seqs = new Set(S.perfil.sequenciais || []);
+    const abertas = new Set(t.listas.filter((l) => !l.encerrada).map((l) => l.id));
+    const meus = t.resumo.filter((r) => abertas.has(r.lista_id) && r.status !== 'feito' && seqs.has(r.sequencial)).reduce((a, r) => a + r.qtd, 0);
+    return { listas: abertas.size, meus };
+  }
+
+  async function telaTarefas() {
+    const id = parseInt(consultaHash().get('id'), 10);
+    if (id) return telaTarefa(id);
+    UI.topo('Listas de Cumprimento', 'Pedidos da Corregedoria e da chefia', true);
+    UI.render(`<section>${'<div class="cartao esqueleto"></div>'.repeat(3)}</section>`);
+    let t;
+    try { t = await DB.listarListasTarefas(); }
+    catch (e) { UI.render(`<section><div class="vazio">${ic('prancheta')}<p>As listas ainda não estão disponíveis.</p><p class="dica">${esc(e.message)}</p></div></section>`); return; }
+    S.tarefas = t;
+    const seqs = new Set(S.perfil.sequenciais || []);
+    const abertas = t.listas.filter((l) => !l.encerrada), fechadas = t.listas.filter((l) => l.encerrada);
+    const cartao = (l) => {
+      const linhas = t.resumo.filter((r) => r.lista_id === l.id);
+      const c = contaTar(linhas), meu = contaTar(linhas, (s) => seqs.has(s));
+      return `
+        <a class="cartao lista-tar${l.encerrada ? ' encerrada' : ''}" href="#/tarefas?id=${l.id}">
+          <div class="lt-disco">${Graficos.rosca(segsTar(c, ehAud(l)), { centro: c.pctTxt, sub: 'feito', tamanho: 88 })}</div>
+          <div class="lt-info">
+            <span class="selo ${ehAud(l) ? 'aud' : ''}">${ehAud(l) ? ic('calendario') + ' Audiências' : ic('prancheta') + ' Cumprimento'}</span>
+            <b>${esc(l.titulo)}</b>
+            <small>${l.origem ? esc(l.origem) + ' · ' : ''}${Graficos.fmt(c.feitos)} de ${Graficos.fmt(c.total)} ${ehAud(l) ? 'pautadas' : 'cumpridos'}${l.prazo ? ' · ' + textoPrazo(l.prazo) : ''}</small>
+            ${seqs.size && !l.encerrada ? `<span class="lt-meus">${meu.pend ? `Seus finais: <b>${meu.pend}</b> por fazer` : (meu.total ? '<span class="ok-txt">&#10003; Seus finais estão em dia</span>' : 'Nenhum processo dos seus finais')}</span>` : ''}
+          </div>
+          <span class="lt-seta">${ic('voltar')}</span>
+        </a>`;
+    };
+    UI.render(`
+      <section>
+        ${UI.ajuda('tarefas', 'Como funcionam as listas', [
+          'Cada lista é um <b>pedido</b> (da Corregedoria, por exemplo) com vários processos. O <b>disco</b> mostra quanto já foi feito.',
+          'Toque numa lista. Os processos dos <b>seus finais</b> já aparecem separados para você.',
+          'Toque em <b>Copiar</b>, abra o processo no SAJ, faça o que a lista pede e volte para tocar em <b>Cumprido</b> (ou <b>Pautada</b>, nas listas de audiência).',
+          'Todo mundo vê o andamento na hora, inclusive a chefia. Marcou errado? Toque em <b>Desfazer</b>.'
+        ])}
+        ${ehAdmin() ? `
+        <div class="cartao nova-tar" id="tarNova">
+          <div class="cartao-cab"><h3>${ic('mais')} Nova lista</h3></div>
+          <p class="dica">Recebeu uma planilha com números de processo? Envie aqui: o app separa por <b>final (sequencial)</b> sozinho e cada servidor vê só os seus.</p>
+          <label class="btn primario largo arquivo">${ic('enviar')} Escolher a planilha (.xlsx)<input type="file" id="tarArq" accept=".xlsx,.xls,.csv"></label>
+          <div id="tarPrev"></div>
+        </div>` : ''}
+        ${abertas.length ? abertas.map(cartao).join('') : `<div class="vazio">${ic('prancheta')}<p>Nenhuma lista aberta no momento.</p>${ehAdmin() ? '' : '<p class="dica">Quando a chefia enviar uma lista, ela aparece aqui.</p>'}</div>`}
+        ${fechadas.length ? `<details class="tar-fechadas"><summary>Listas encerradas (${fechadas.length})</summary>${fechadas.map(cartao).join('')}</details>` : ''}
+      </section>`);
+    if (ehAdmin()) ligarNovaLista();
+  }
+
+  function ligarNovaLista() {
+    $('#tarArq').addEventListener('change', async (ev) => {
+      const f = ev.target.files[0]; if (!f) return;
+      const alvo = $('#tarPrev');
+      alvo.innerHTML = '<div class="carregando">Lendo a planilha…</div>';
+      let r;
+      try { r = await Parser.lerListaTarefas(f); }
+      catch (e) { alvo.innerHTML = `<p class="alerta-txt">${esc(e.message)}</p>`; ev.target.value = ''; return; }
+      // Sequencial que faltar: tenta achar no relatório de processos parados
+      if (r.comSeq < r.itens.length) {
+        try { if (!S.processos.length) await carregar('processos'); } catch (_) {}
+        const ac = new Map(S.processos.map((p) => [p.numero, p.sequencial]));
+        r.itens.forEach((x) => { if (x.sequencial == null && ac.get(x.numero) != null) x.sequencial = ac.get(x.numero); });
+        r.comSeq = r.itens.filter((x) => x.sequencial != null).length;
+      }
+      const porSeq = Array.from({ length: 10 }, (_, k) => ({ rotulo: String(k), valor: r.itens.filter((x) => x.sequencial === k).length }));
+      const semSeq = r.itens.length - r.comSeq;
+      const pareceAud = /audi[eê]n/i.test(r.titulo + ' ' + r.arquivo);
+      const G = Graficos;
+      alvo.innerHTML = `
+        <div class="tar-prev">
+          <p class="ok-txt">&#10003; <b>${G.fmt(r.itens.length)}</b> processos encontrados${Object.keys(r.areas).length > 1 || !r.areas['Sem área'] ? ' · ' + Object.entries(r.areas).map(([k, v]) => `${esc(k)} ${G.fmt(v)}`).join(' · ') : ''}</p>
+          ${semSeq ? `<p class="dica">${G.fmt(semSeq)} sem final (sequencial): aparecem para quem escolher "Sem final".</p>` : ''}
+          <div class="rotulo">Quantos processos ficam com cada final</div>
+          ${G.colunas(porSeq)}
+          <label>Nome da lista<input id="tarTitulo" maxlength="120" value="${esc(r.titulo)}"></label>
+          <div class="rotulo">O que os servidores devem fazer?</div>
+          <div class="tar-tipo-esc">
+            <label class="opcao"><input type="radio" name="tarTipo" value="cumprir"${pareceAud ? '' : ' checked'}><span>${ic('prancheta')}<b>Cumprir</b><small>Fazer o ato pedido e marcar <b>Cumprido</b></small></span></label>
+            <label class="opcao"><input type="radio" name="tarTipo" value="audiencia"${pareceAud ? ' checked' : ''}><span>${ic('calendario')}<b>Audiências</b><small>Ver na decisão qual audiência é, escolher o tipo e marcar <b>Pautada</b></small></span></label>
+          </div>
+          <label>Explique em poucas palavras o pedido <small>(aparece no topo da lista)</small>
+            <textarea id="tarOrient" rows="3" maxlength="1000" placeholder="${pareceAud ? 'Ex.: A Corregedoria pede que todas estas audiências sejam marcadas na pauta.' : 'Ex.: Cumprir o despacho pendente e movimentar no SAJ.'}">${pareceAud ? 'A Corregedoria pede que todas estas audiências sejam marcadas na pauta. Abra a decisão no SAJ, veja qual audiência foi determinada, escolha o tipo aqui e, depois de pautar, toque em Pautada.' : ''}</textarea></label>
+          <div class="linha2">
+            <label>Quem pediu<input id="tarOrigem" maxlength="120" value="Corregedoria"></label>
+            <label>Prazo <small>(opcional)</small><input type="date" id="tarPrazo"></label>
+          </div>
+          ${r.temProvidencia ? '<p class="dica">A planilha tem uma coluna de providência: ela aparece em cada processo.</p>' : ''}
+          <div class="acoes"><button class="btn primario" id="tarCriar">${ic('check')} Criar lista com ${G.fmt(r.itens.length)} processos</button>
+          <button class="btn secundario" id="tarCancelar">Cancelar</button></div>
+        </div>`;
+      $('#tarCancelar').addEventListener('click', () => { alvo.innerHTML = ''; ev.target.value = ''; });
+      $('#tarCriar').addEventListener('click', (e2) => UI.ocupado(e2.currentTarget, async () => {
+        const lista = {
+          titulo: $('#tarTitulo').value.trim() || r.titulo,
+          tipo: ($('input[name=tarTipo]:checked') || {}).value || 'cumprir',
+          orientacao: $('#tarOrient').value.trim(),
+          origem: $('#tarOrigem').value.trim(),
+          prazo: $('#tarPrazo').value || null
+        };
+        const novo = await DB.criarListaTarefas(lista, r.itens);
+        UI.toast('Lista criada. Os servidores já podem ver.', 'ok');
+        estadoTar.id = null;
+        location.hash = '#/tarefas?id=' + novo;
+      }));
+    });
+  }
+
+  async function telaTarefa(id) {
+    UI.topo('Lista de Cumprimento', 'Carregando…', true);
+    UI.render(`<section>${'<div class="cartao esqueleto"></div>'.repeat(3)}</section>`);
+    const [t, itens] = await Promise.all([DB.listarListasTarefas(), DB.itensDaLista(id), carregar('usuarios')]);
+    const l = t.listas.find((x) => x.id === id);
+    if (!l) { UI.render(`<section><div class="vazio">${ic('prancheta')}<p>Esta lista não existe mais.</p><a class="btn secundario" href="#/tarefas">Ver as listas</a></div></section>`); return; }
+    const meusSeqs = new Set(S.perfil.sequenciais || []);
+    if (estadoTar.id !== id) estadoTar = { id, ver: 'falta', seq: meusSeqs.size ? 'meus' : 'todos', area: 'Todas', busca: '', limite: 40 };
+    const st = estadoTar, aud = ehAud(l), G = Graficos;
+    let dados = itens;
+    const areas = [...new Set(dados.map((x) => x.area).filter(Boolean))];
+    UI.topo(l.titulo, (aud ? 'Audiências' : 'Cumprimento') + (l.origem ? ' · ' + l.origem : ''), true);
+
+    UI.render(`
+      <section class="tela-tar">
+        ${UI.ajuda(aud ? 'tarefaAud' : 'tarefaCump', aud ? 'Como fazer esta lista de audiências' : 'Como fazer esta lista', aud ? [
+          'Toque em <b>Copiar</b> e abra o processo no SAJ.',
+          'Leia a <b>decisão</b> e veja qual audiência o juiz determinou.',
+          'Toque no tipo: <b>Conciliação</b>, <b>Instrução e Julgamento</b>, <b>Preliminar</b> (criminal) ou <b>Júri</b>.',
+          'Depois de marcar a audiência na pauta, toque em <b>Pautada</b>. Pronto: o disco avança para todos.'
+        ] : [
+          'Toque em <b>Copiar</b> e abra o processo no SAJ.',
+          'Faça o que a lista pede (veja o quadro "O que fazer").',
+          'Volte aqui e toque em <b>Cumprido</b>. O disco avança para todos.',
+          'Marcou errado? Toque em <b>Desfazer</b>.'
+        ])}
+        <div class="cartao tar-oque">
+          <div class="cartao-cab"><h3>${ic('sino')} O que fazer</h3>${l.encerrada ? '<span class="selo">Encerrada</span>' : ''}</div>
+          <p>${l.orientacao ? esc(l.orientacao).replace(/\n/g, '<br>') : aud ? 'Identificar o tipo de audiência de cada processo e marcá-la na pauta.' : 'Cumprir cada processo e marcar como cumprido.'}</p>
+          <p class="dica">${l.prazo ? textoPrazo(l.prazo) + ' · ' : ''}criada em ${UI.dataHora(l.criado_em)}${l.criado_por ? ' por ' + esc(nomeUsuario(l.criado_por)) : ''}</p>
+        </div>
+        <div class="cartao" id="tarAndamento"></div>
+        <div class="cartao">
+          <div class="cartao-cab"><h3>${ic('pessoa')} Andamento por final</h3></div>
+          <p class="dica">Toque num final para ver só os processos dele.</p>
+          <div class="tar-finais" id="tarFinais"></div>
+        </div>
+        <div class="cartao" id="tarListaCartao">
+          <div class="segmentado" id="tarVer" role="tablist"></div>
+          ${areas.length > 1 ? `<div class="abas" id="tarArea">${['Todas', ...areas].map((a) => `<button class="aba${st.area === a ? ' on' : ''}" data-a="${esc(a)}">${esc(a)}</button>`).join('')}</div>` : ''}
+          <div class="linha"><input type="search" id="tarBusca" placeholder="Buscar pelo número do processo…" value="${esc(st.busca)}"></div>
+          <div class="resumo-lista" id="tarResumo"></div>
+          <div class="lista" id="tarLista"></div>
+        </div>
+        ${ehAdmin() ? `
+        <div class="cartao tar-admin">
+          <div class="cartao-cab"><h3>${ic('cadeado')} Administração da lista</h3></div>
+          <p class="dica">Encerre quando o pedido estiver concluído: a lista vai para "encerradas" e ninguém mais marca nela.</p>
+          <div class="acoes">
+            <button class="btn secundario" data-tadm="${l.encerrada ? 'reabrir' : 'encerrar'}">${l.encerrada ? 'Reabrir lista' : ic('check') + ' Encerrar lista'}</button>
+            <button class="btn secundario perigo" data-tadm="excluir">Excluir lista</button>
+          </div>
+        </div>` : ''}
+      </section>`);
+
+    const filtroSeq = () => st.seq === 'meus' ? (s) => meusSeqs.has(s) : st.seq === 'todos' ? () => true : st.seq === 'sem' ? (s) => s == null : (s) => s === st.seq;
+    const rotuloSeq = () => st.seq === 'meus' ? 'dos seus finais (' + UI.listaSeq([...meusSeqs]) + ')' : st.seq === 'todos' ? 'de todos os finais' : st.seq === 'sem' ? 'sem final' : 'do final ' + st.seq;
+
+    function desenharAndamento() {
+      const geral = contaTar(resumoDeItens(dados));
+      const meu = contaTar(resumoDeItens(dados), (s) => meusSeqs.has(s));
+      const porTipo = {};
+      dados.forEach((x) => { if (x.aud_tipo) porTipo[x.aud_tipo] = (porTipo[x.aud_tipo] || 0) + 1; });
+      const tipos = TIPOS_AUD.filter((k) => porTipo[k]).map((k) => ({ rotulo: k, valor: porTipo[k], cor: G.COR.s1 }));
+      const legs = segsTar(geral, aud);
+      $('#tarAndamento').innerHTML = `
+        <div class="cartao-cab"><h3>${ic('grafico')} Andamento da lista</h3><span class="selo">${G.fmt(geral.total)} processos</span></div>
+        <div class="tar-and">
+          ${G.rosca(legs, { centro: geral.pctTxt, sub: aud ? 'pautadas' : 'cumpridos', tamanho: 132 })}
+          <div class="tar-and-num">
+            ${legs.map((g) => `<div><i style="background:${g.cor}"></i><span>${g.rotulo}</span><b>${G.fmt(g.valor)}</b></div>`).join('')}
+            ${meusSeqs.size ? `<div class="tar-meu">Seus finais: <b>${G.fmt(meu.feitos)}</b> de <b>${G.fmt(meu.total)}</b>${meu.total ? ` <span class="${meu.pend ? '' : 'ok-txt'}">${meu.pend ? '· faltam ' + meu.pend : '&#10003; em dia'}</span>` : ''}</div>` : ''}
+          </div>
+        </div>
+        ${aud && tipos.length ? `<div class="rotulo">Tipos já identificados</div>${G.barrasH(tipos, { larguraRotulo: 150 })}` : ''}`;
+      const fin = [...Array(10).keys()].map((k) => ({ k, c: contaTar(resumoDeItens(dados), (s) => s === k) }));
+      const sem = contaTar(resumoDeItens(dados), (s) => s == null);
+      const tile = (val, rot, c, extra) => `
+        <button type="button" class="tar-final${String(st.seq) === String(val) ? ' on' : ''}${extra || ''}" data-seq="${val}">
+          ${G.rosca(segsTar(c, aud), { mini: true, tamanho: 34 })}
+          <b>${rot}</b><small>${c.total ? `${c.feitos}/${c.total}` : '—'}</small>
+        </button>`;
+      $('#tarFinais').innerHTML =
+        (meusSeqs.size ? tile('meus', 'Meus', contaTar(resumoDeItens(dados), (s) => meusSeqs.has(s)), ' meus') : '') +
+        tile('todos', 'Todos', geral, ' todos') +
+        fin.map(({ k, c }) => tile(k, String(k), c, meusSeqs.has(k) ? ' eh-meu' : '')).join('') +
+        (sem.total ? tile('sem', 'Sem', sem) : '');
+    }
+
+    function desenharLista() {
+      const fs = filtroSeq();
+      const dig = st.busca.replace(/\D/g, '');
+      const base = dados.filter((x) => fs(x.sequencial) && (st.area === 'Todas' || x.area === st.area) && (!dig || x.numero.replace(/\D/g, '').includes(dig)));
+      const falta = base.filter((x) => x.status !== 'feito'), feitos = base.filter((x) => x.status === 'feito');
+      const lista = st.ver === 'falta' ? falta : st.ver === 'feito' ? feitos : base;
+      const segs = [['falta', 'Falta fazer', falta.length], ['feito', aud ? 'Pautadas' : 'Feitos', feitos.length], ['todos', 'Todos', base.length]];
+      const iv = segs.findIndex((s) => s[0] === st.ver);
+      $('#tarVer').style.setProperty('--seg', iv);
+      $('#tarVer').innerHTML = segs.map(([k, t, n]) => `<button class="${st.ver === k ? 'on' : ''}" data-v="${k}" role="tab">${t} <small>${n}</small></button>`).join('') + '<span class="seg-ind"></span>';
+      $('#tarResumo').innerHTML = `${lista.length} processo(s) ${rotuloSeq()}${lista.length && st.ver !== 'feito' ? ` <button class="btn mini" data-tacao="copiarTodos">${ic('copiar')} Copiar os números</button>` : ''}`;
+      if (!lista.length) {
+        $('#tarLista').innerHTML = `<div class="vazio">${st.ver === 'falta' && base.length ? '&#127881; Tudo feito por aqui. Bom trabalho!' : 'Nenhum processo com estes filtros.'}</div>`;
+        return;
+      }
+      $('#tarLista').innerHTML = lista.slice(0, st.limite).map(itemTar).join('') +
+        (lista.length > st.limite ? `<button class="btn secundario largo" data-tacao="mais">Mostrar mais (${lista.length - st.limite})</button>` : '');
+      $('#tarLista').dataset.total = lista.length;
+    }
+
+    function itemTar(x) {
+      const feito = x.status === 'feito';
+      const meu = x.feito_por === S.perfil.id;
+      const tarjas = (x.tarjas || '').split(' · ').filter(Boolean);
+      return `
+        <div class="proc tar-item${feito ? ' feito' : ''}" data-id="${x.id}" data-n="${esc(x.numero)}">
+          <div class="proc-num">${esc(x.numero)}</div>
+          <div class="proc-meta">
+            <span class="badge seqb${meusSeqs.has(x.sequencial) ? ' meu' : ''}">Final ${x.sequencial == null ? '—' : x.sequencial}</span>
+            ${x.area ? `<span>${esc(x.area)}</span>` : ''}
+            ${x.dias != null ? `<span class="${x.dias >= 365 ? 'alerta-txt' : ''}">${G.fmt(x.dias)} dias na fila</span>` : ''}
+            ${tarjas.map((k) => `<span class="badge tarja">${esc(k)}</span>`).join('')}
+          </div>
+          ${x.providencia ? `<div class="tar-prov">${ic('sino')} ${esc(x.providencia)}</div>` : ''}
+          ${aud ? `
+          <div class="tar-tipos">
+            <span class="rotulo">${x.aud_tipo ? 'Audiência:' : 'Qual audiência a decisão determinou?'}</span>
+            <div class="chips">${TIPOS_AUD.map((k) => `<button type="button" class="chip${x.aud_tipo === k ? ' on' : ''}" data-tacao="tipo" data-tipo="${esc(k)}"${l.encerrada ? ' disabled' : ''}>${esc(k)}</button>`).join('')}</div>
+          </div>` : ''}
+          ${feito ? `<div class="proc-meta"><span class="ok-txt">&#10003; ${verboFeito(l)} por ${esc(nomeUsuario(x.feito_por))} · ${UI.dataHora(x.feito_em)}</span></div>` : ''}
+          <div class="proc-acoes">
+            <button class="btn mini" data-tacao="copiar">${ic('copiar')} Copiar</button>
+            ${l.encerrada ? '' : feito
+              ? (meu || ehAdmin() ? '<button class="btn mini" data-tacao="desfazer">Desfazer</button>' : '')
+              : `<button class="btn mini ok grande" data-tacao="feito">${ic('check')} ${verboFeito(l)}</button>`}
+          </div>
+        </div>`;
+    }
+
+    function tudo() { desenharAndamento(); desenharLista(); }
+    tudo();
+    animarNumeros($('#app'));
+
+    $('#tarFinais').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-seq]'); if (!b) return;
+      const v = b.dataset.seq;
+      st.seq = ['meus', 'todos', 'sem'].includes(v) ? v : parseInt(v, 10);
+      st.limite = 40;
+      $$('#tarFinais .tar-final').forEach((x) => x.classList.toggle('on', x === b));
+      desenharLista();
+      $('#tarListaCartao').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    $('#tarVer').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-v]'); if (!b) return;
+      st.ver = b.dataset.v; st.limite = 40; desenharLista();
+    });
+    if ($('#tarArea')) $('#tarArea').addEventListener('click', (e) => {
+      const b = e.target.closest('.aba'); if (!b) return;
+      st.area = b.dataset.a; st.limite = 40;
+      $$('#tarArea .aba').forEach((x) => x.classList.toggle('on', x === b)); desenharLista();
+    });
+    $('#tarBusca').addEventListener('input', (e) => { st.busca = e.target.value; desenharLista(); });
+
+    $('#tarLista').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-tacao]'); if (!b) return;
+      const ac = b.dataset.tacao;
+      if (ac === 'mais') { st.limite += 60; desenharLista(); return; }
+      if (ac === 'copiarTodos') return;
+      const card = b.closest('.tar-item'); const itemId = parseInt(card.dataset.id, 10);
+      const x = dados.find((d) => d.id === itemId);
+      if (ac === 'copiar') return UI.copiar(x.numero);
+      if (ac === 'feito' && aud && !x.aud_tipo) {
+        UI.toast('Antes, toque no tipo da audiência (Conciliação, Instrução…).', 'erro');
+        const tp = $('.tar-tipos', card); tp.classList.remove('chamar'); void tp.offsetWidth; tp.classList.add('chamar');
+        return;
+      }
+      let status = null, tipo;
+      if (ac === 'feito') status = 'feito';
+      if (ac === 'desfazer') status = 'pendente';
+      if (ac === 'tipo') tipo = x.aud_tipo === b.dataset.tipo ? '' : b.dataset.tipo;
+      b.disabled = true;
+      try {
+        const novo = await DB.marcarTarefa(itemId, status, tipo);
+        Object.assign(x, novo || {});
+        if (ac === 'feito') {
+          UI.toast(aud ? 'Audiência marcada como pautada. Ótimo!' : 'Marcado como cumprido. Bom trabalho!', 'ok');
+          if (st.ver === 'falta') { card.classList.add('saindo'); await new Promise((r) => setTimeout(r, 320)); }
+        }
+        if (ac === 'desfazer') UI.toast('Desfeito: voltou para "Falta fazer".', 'ok');
+        if (ac === 'tipo') {
+          desenharAndamento();
+          const novoCard = itemTar(x);
+          card.outerHTML = novoCard;
+          return;
+        }
+        tudo();
+      } catch (err) {
+        UI.toast(err.message || String(err), 'erro');
+        b.disabled = false;
+      }
+    });
+    $('#tarResumo').addEventListener('click', (e) => {
+      if (!e.target.closest('[data-tacao="copiarTodos"]')) return;
+      const fs = filtroSeq(), dig = st.busca.replace(/\D/g, '');
+      const nums = dados.filter((x) => fs(x.sequencial) && (st.area === 'Todas' || x.area === st.area) && (!dig || x.numero.replace(/\D/g, '').includes(dig)) && (st.ver === 'todos' || x.status !== 'feito')).map((x) => x.numero);
+      UI.copiar(nums.join('\n'), nums.length + ' número(s) copiados, um por linha. Cole no SAJ ou numa planilha.');
+    });
+    const adm = $('.tar-admin');
+    if (adm) adm.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-tadm]'); if (!b) return;
+      const a = b.dataset.tadm;
+      if (a === 'excluir' && !confirmar('Excluir esta lista e todas as marcações? Não dá para desfazer.')) return;
+      if (a === 'encerrar' && !confirmar('Encerrar esta lista? Ninguém mais poderá marcar nela.')) return;
+      UI.ocupado(b, async () => {
+        if (a === 'excluir') { await DB.excluirListaTarefas(id); UI.toast('Lista excluída.', 'ok'); location.hash = '#/tarefas'; return; }
+        await DB.atualizarListaTarefas(id, { encerrada: a === 'encerrar' });
+        UI.toast(a === 'encerrar' ? 'Lista encerrada.' : 'Lista reaberta.', 'ok');
+        rotear();
+      });
+    });
+
+    // Volta do SAJ para o app: busca as marcações dos colegas
+    tarRecarregar = async () => {
+      if (!$('#tarLista') || estadoTar.id !== id) return;
+      try { dados = await DB.itensDaLista(id); tudo(); } catch (_) {}
+    };
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && tarRecarregar) tarRecarregar(); });
 
   // ======================= FILAS DE CUMPRIMENTO =======================
   const ORDEM_FAIXA = ['1 a 15 dias', '+ 15 dias', '+ 30 dias', '+ 60 dias', '+ 100 dias', '+ 120 dias', '+ 180 dias', '+ 365 dias'];
@@ -1585,7 +1981,7 @@
   }
 
   // Transição entre telas: avança deslizando da direita, volta deslizando da esquerda
-  const ORDEM_TELAS = ['/', '/parados', '/filas', '/meta', '/meta2', '/gabinete', '/repasses', '/admin', '/conta'];
+  const ORDEM_TELAS = ['/', '/parados', '/filas', '/tarefas', '/meta', '/meta2', '/gabinete', '/repasses', '/admin', '/conta'];
   let rotaAtual = null;
   function transicao(rota) {
     const app = document.getElementById('app');
@@ -1623,7 +2019,7 @@
     transicao(rota);
     const telas = {
       '/': telaInicio, '/parados': telaParados, '/filas': telaFilas, '/meta2': telaMeta2, '/meta': telaMeta, '/gabinete': telaGabinete,
-      '/repasses': telaRepasses, '/admin': telaAdmin, '/conta': telaConta
+      '/repasses': telaRepasses, '/admin': telaAdmin, '/conta': telaConta, '/tarefas': telaTarefas
     };
     try { await (telas[rota] || telaInicio)(); }
     catch (e) {

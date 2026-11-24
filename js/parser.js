@@ -391,6 +391,97 @@
     throw new Error('Não encontrei as colunas "Processo" e "Fila" nesta planilha.');
   }
 
+  // --------------------------------------------------------
+  // Listas de cumprimento (Corregedoria, chefia etc.)
+  //   Qualquer planilha com números de processo. Colunas opcionais
+  //   reconhecidas: Seq./Sequencial, Área/Subfluxo, Dias, Tarjas,
+  //   Providência/Cumprimento/Determinação/Observação.
+  //   Várias abas são juntas (sem repetir processo).
+  //   LGPD: tarjas de saúde/idade viram só "Prioridade legal".
+  // --------------------------------------------------------
+  function mapaTarefas(cab) {
+    if (cab.filter(Boolean).length < 2) return null; // linha de título, não de cabeçalho
+    const processo = acharCol(cab, (c) => (c.length <= 30 && c.includes('processo') && !/data|classe|assunto|tipo|total/.test(c)) || c === 'numero' || c === 'nº');
+    if (processo < 0) return null;
+    return {
+      processo,
+      seq: acharCol(cab, (c) => c === 'seq' || c === 'seq.' || c.startsWith('sequencial') || c === 'final'),
+      area: acharCol(cab, (c) => c.startsWith('area') || c.includes('subfluxo') || c.startsWith('competencia')),
+      dias: acharCol(cab, (c) => c.startsWith('dias') || c.includes('dias na fila') || c.includes('dias parado')),
+      tarjas: acharCol(cab, (c) => c.startsWith('tarja') || c.startsWith('prioridade')),
+      prov: acharCol(cab, (c) => /^(providencia|cumprimento|determinacao|diligencia|o que fazer|tarefa|ato|observa)/.test(c))
+    };
+  }
+  const RE_SAUDE = /doen|defici|idos|crian|adolesc|gestant|autis|neoplas|cancer|hiv|saude|saúde|tea\b/i;
+  const RE_CNJ_INC = /\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}(\/\d{1,4})?/; // aceita incidentes (/01)
+  function limparTarjas(v) {
+    const t = txt(v);
+    if (!t) return '';
+    const partes = t.split(/\s*(?:\/|,|;|\|| e )\s*/).map((x) => x.trim()).filter(Boolean)
+      .map((x) => RE_SAUDE.test(x) ? 'Prioridade legal' : x.replace(/^portador de\s*/i, ''));
+    return [...new Set(partes)].join(' · ').slice(0, 160);
+  }
+  function areaTexto(v) {
+    const n = norm(v);
+    if (!n) return '';
+    if (n.includes('crim') || n.includes('garantia') || n.includes('juri')) return 'Criminal';
+    if (n.includes('civ') || n.includes('famil') || n.includes('fazenda') || n.includes('juizado')) return 'Cível';
+    return txt(v).slice(0, 40);
+  }
+  async function lerListaTarefas(file) {
+    const abas = await lerArquivo(file, true);
+    const mapa = new Map();
+    let titulo = '', ordem = 0;
+    for (const aba of abas) {
+      const cab = acharCabecalho(aba.linhas, mapaTarefas);
+      const areaAba = /c[ií]vel|criminal|crime/i.test(aba.nome) ? areaTexto(aba.nome) : '';
+      const ini = cab ? cab.indice + 1 : 0;
+      if (!titulo) {
+        for (let i = 0; i < Math.min(ini || 3, 3); i++) {
+          const t = (aba.linhas[i] || []).map(txt).find((x) => x && !RE_CNJ_INC.test(x));
+          if (t && t.length > 8) {
+            titulo = t.replace(/\s+[—-]\s+/g, ' — ').replace(/^(painel de controle|relat[oó]rio|planilha)\s*[—:-]\s*/i, '');
+            if (titulo === titulo.toUpperCase()) titulo = titulo.charAt(0) + titulo.slice(1).toLowerCase();
+            titulo = titulo.slice(0, 90); break;
+          }
+        }
+      }
+      for (let i = ini; i < aba.linhas.length; i++) {
+        const l = aba.linhas[i] || [];
+        let achou = null;
+        if (cab) achou = String(l[cab.mapa.processo] || '').match(RE_CNJ_INC);
+        if (!achou) { for (const c of l) { const m = String(c || '').match(RE_CNJ_INC); if (m) { achou = m; break; } } }
+        if (!achou) continue;
+        const m = cab ? cab.mapa : {};
+        const pega = (k) => (m[k] != null && m[k] >= 0 ? l[m[k]] : '');
+        const s = parseInt(String(pega('seq')).replace(/\D/g, ''), 10);
+        const d = parseInt(String(pega('dias')).replace(/\D/g, ''), 10);
+        const novo = {
+          numero: achou[0],
+          sequencial: Number.isFinite(s) && s >= 0 && s <= 9 ? s : null,
+          area: areaTexto(pega('area')) || areaAba,
+          dias: Number.isFinite(d) ? d : null,
+          tarjas: limparTarjas(pega('tarjas')),
+          providencia: txt(pega('prov')).slice(0, 300)
+        };
+        const velho = mapa.get(novo.numero);
+        if (!velho) { novo.ordem = ++ordem; mapa.set(novo.numero, novo); continue; }
+        for (const k of ['sequencial', 'area', 'dias', 'tarjas', 'providencia']) {
+          if ((velho[k] == null || velho[k] === '') && novo[k] != null && novo[k] !== '') velho[k] = novo[k];
+        }
+      }
+    }
+    const itens = [...mapa.values()];
+    if (!itens.length) throw new Error('Não encontrei números de processo (padrão CNJ) nesta planilha.');
+    const nomeArq = String(file.name || '').replace(/\.[^.]+$/, '').replace(/^[0-9a-f]{8}-/, '').replace(/[_]+/g, ' ').trim();
+    return {
+      itens, titulo: titulo || nomeArq, arquivo: file.name || '',
+      comSeq: itens.filter((x) => x.sequencial != null).length,
+      areas: itens.reduce((a, x) => { const k = x.area || 'Sem área'; a[k] = (a[k] || 0) + 1; return a; }, {}),
+      temProvidencia: itens.some((x) => x.providencia)
+    };
+  }
+
   // Descobre qual relatório é, pelo cabeçalho
   async function identificar(file) {
     const abas = await lerArquivo(file, true);
@@ -454,5 +545,5 @@
     throw new Error('Não encontrei as colunas "Data" e "Tipo" (Entrada/Arquivamento) na planilha.');
   }
 
-  window.Parser = { lerFilaProc, lerMetaCNJ, lerParados, lerMovimentacao, lerFilas, lerListaMes, lerIAD, identificar, area, RE_CNJ, faixaDeDias };
+  window.Parser = { lerListaTarefas, lerFilaProc, lerMetaCNJ, lerParados, lerMovimentacao, lerFilas, lerListaMes, lerIAD, identificar, area, RE_CNJ, faixaDeDias };
 })();

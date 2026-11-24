@@ -159,6 +159,30 @@
     return s + '</svg>';
   }
 
+  // ---------- 7. Disco (rosca) de andamento ----------
+  // segs: [{rotulo, valor, cor}] · centro: texto grande · sub: texto pequeno
+  // tamanho em px; mini=true desenha só o anel (sem textos)
+  function rosca(segs, { centro = '', sub = '', tamanho = 132, mini = false, espessura } = {}) {
+    const S = 100, c = S / 2, esp = espessura || (mini ? 16 : 13), r = c - esp / 2 - 1;
+    const total = segs.reduce((a, b) => a + b.valor, 0);
+    const vis = segs.filter((g) => g.valor > 0);
+    const circ = 2 * Math.PI * r, gap = vis.length > 1 ? 1.6 : 0;
+    let s = `<svg class="graf rosca${mini ? ' mini' : ''}" viewBox="0 0 ${S} ${S}" width="${tamanho}" height="${tamanho}" role="img" aria-label="${esc(sub ? centro + ' ' + sub : centro)}">`;
+    s += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="rgba(158,171,198,.16)" stroke-width="${esp}"/>`;
+    let ac = 0;
+    if (total > 0) vis.forEach((g) => {
+      const parte = (g.valor / total) * circ;
+      const len = Math.max(parte - gap, 0.8);
+      s += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${g.cor}" stroke-width="${esp}" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-ac).toFixed(2)}" transform="rotate(-90 ${c} ${c})" data-tip="${esc(g.rotulo)}: ${fmt(g.valor)} (${Math.round(g.valor / total * 100)}%)"/>`;
+      ac += parte;
+    });
+    if (!mini) {
+      s += `<text x="${c}" y="${sub ? c + 2 : c + 7}" text-anchor="middle" class="r-centro">${esc(centro)}</text>`;
+      if (sub) s += `<text x="${c}" y="${c + 16}" text-anchor="middle" class="r-sub">${esc(sub)}</text>`;
+    }
+    return s + '</svg>';
+  }
+
   function legenda(itens) {
     return '<div class="g-legenda">' + itens.map((i) => `<span><i style="background:${i.cor}"></i>${esc(i.rotulo)}</span>`).join('') + '</div>';
   }
@@ -179,5 +203,5 @@
   document.addEventListener('pointerdown', mostrar);
   document.addEventListener('scroll', () => dica && dica.classList.remove('vis'), true);
 
-  window.Graficos = { bullet, barrasH, colunasAgrupadas, linha, pilha100, colunas, legenda, COR, fmt };
+  window.Graficos = { rosca, bullet, barrasH, colunasAgrupadas, linha, pilha100, colunas, legenda, COR, fmt };
 })();

@@ -165,7 +165,32 @@
       },
       async criarRepasse(r) { ok(await sb.from('repasses').insert(r)); },
       async atualizarRepasse(id, campos) { ok(await sb.from('repasses').update(campos).eq('id', id)); },
-      async excluirRepasse(id) { ok(await sb.from('repasses').delete().eq('id', id)); }
+      async excluirRepasse(id) { ok(await sb.from('repasses').delete().eq('id', id)); },
+
+      // ---- Listas de cumprimento (Corregedoria, chefia…) ----
+      async listarListasTarefas() {
+        const listas = ok(await sb.from('tarefas_listas').select('*').order('encerrada').order('criado_em', { ascending: false }).limit(100));
+        const resumo = ok(await sb.from('tarefas_resumo').select('*'));
+        return { listas, resumo };
+      },
+      async criarListaTarefas(lista, itens) {
+        return ok(await sb.rpc('criar_lista_tarefas', { lista, itens }));
+      },
+      async itensDaLista(id) {
+        let todos = [], de = 0;
+        for (;;) {
+          const pg = ok(await sb.from('tarefas_itens').select('*').eq('lista_id', id).order('ordem').range(de, de + 999));
+          todos = todos.concat(pg);
+          if (pg.length < 1000) break;
+          de += 1000;
+        }
+        return todos;
+      },
+      async marcarTarefa(item, status, tipo) {
+        return ok(await sb.rpc('marcar_tarefa', { item, novo_status: status || null, tipo: tipo === undefined ? null : tipo }));
+      },
+      async atualizarListaTarefas(id, campos) { ok(await sb.from('tarefas_listas').update(campos).eq('id', id)); },
+      async excluirListaTarefas(id) { ok(await sb.from('tarefas_listas').delete().eq('id', id)); }
     };
   }
 
@@ -324,6 +349,47 @@
         exigeAprovado(); const r = st.repasses.find((x) => x.id === id); if (r) Object.assign(r, campos); salvar();
       },
       async excluirRepasse(id) { exigeAprovado(); st.repasses = st.repasses.filter((x) => x.id !== id); salvar(); },
+
+      // ---- Listas de cumprimento ----
+      async listarListasTarefas() {
+        exigeAprovado();
+        const listas = copia(st.tListas || []).sort((a, b) => (a.encerrada - b.encerrada) || b.criado_em.localeCompare(a.criado_em));
+        const m = new Map();
+        (st.tItens || []).forEach((x) => {
+          const k = [x.lista_id, x.sequencial, x.status, !!x.aud_tipo].join('|');
+          const r = m.get(k) || { lista_id: x.lista_id, sequencial: x.sequencial, status: x.status, com_tipo: !!x.aud_tipo, qtd: 0 };
+          r.qtd++; m.set(k, r);
+        });
+        return { listas, resumo: [...m.values()] };
+      },
+      async criarListaTarefas(lista, itens) {
+        const u = exigeAdmin();
+        const id = st.seq++;
+        st.tListas = st.tListas || []; st.tItens = st.tItens || [];
+        const vistos = new Set();
+        itens.forEach((x) => {
+          if (!x.numero || vistos.has(x.numero)) return; vistos.add(x.numero);
+          st.tItens.push({ id: st.seq++, lista_id: id, ordem: x.ordem || 0, numero: x.numero, sequencial: x.sequencial, area: x.area || null, dias: x.dias, tarjas: x.tarjas || null, providencia: x.providencia || null, aud_tipo: null, status: 'pendente', feito_por: null, feito_em: null });
+        });
+        st.tListas.push({ id, titulo: lista.titulo || 'Lista de cumprimento', tipo: lista.tipo || 'cumprir', orientacao: lista.orientacao || null, origem: lista.origem || null, prazo: lista.prazo || null, total: vistos.size, criado_por: u.id, criado_em: agora(), encerrada: false });
+        salvar(); return id;
+      },
+      async itensDaLista(id) { exigeAprovado(); return copia((st.tItens || []).filter((x) => x.lista_id === id)).sort((a, b) => a.ordem - b.ordem); },
+      async marcarTarefa(item, status, tipo) {
+        const u = exigeAprovado();
+        const r = (st.tItens || []).find((x) => x.id === item);
+        if (!r) throw new Error('Processo não encontrado na lista.');
+        const l = st.tListas.find((x) => x.id === r.lista_id);
+        if (l && l.encerrada) throw new Error('Esta lista foi encerrada.');
+        if (status === 'pendente' && r.status === 'feito' && r.feito_por !== u.id && u.role !== 'admin') throw new Error('Só quem marcou (ou o administrador) pode desfazer.');
+        if (status === 'feito' && r.status !== 'feito') { r.feito_por = u.id; r.feito_em = agora(); }
+        if (status === 'pendente') { r.feito_por = null; r.feito_em = null; }
+        if (status) r.status = status;
+        if (tipo !== undefined && tipo !== null) r.aud_tipo = tipo || null;
+        salvar(); return copia(r);
+      },
+      async atualizarListaTarefas(id, campos) { exigeAdmin(); const l = (st.tListas || []).find((x) => x.id === id); if (l) Object.assign(l, campos); salvar(); },
+      async excluirListaTarefas(id) { exigeAdmin(); st.tListas = (st.tListas || []).filter((x) => x.id !== id); st.tItens = (st.tItens || []).filter((x) => x.lista_id !== id); salvar(); },
 
       // Exclusivo do demo: entrar como outro usuário e apagar tudo
       async demoEntrarComo(id) { st.sessao = id; salvar(); },

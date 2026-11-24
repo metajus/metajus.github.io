@@ -25,7 +25,10 @@
     ampulheta: '<path d="M6 2h12M6 22h12M7 2c0 6 10 6 10 10S7 16 7 22M17 2c0 6-10 6-10 10s10 4 10 10"/>',
     bloqueio: '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
     lista: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-    grafico: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'
+    grafico: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    prancheta: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11.5l2 2 4-4M9 17h6"/>',
+    calendario: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+    mais: '<path d="M12 5v14M5 12h14"/>'
   };
   const ic = (nome) => `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[nome] || ''}</svg></span>`;
 
@@ -117,14 +120,14 @@
       const d = new Date(iso);
       return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     },
-    async copiar(texto) {
+    async copiar(texto, msg) {
       try { await navigator.clipboard.writeText(texto); }
       catch (_) {
         const ta = document.createElement('textarea');
         ta.value = texto; ta.style.position = 'fixed'; ta.style.opacity = '0';
         document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
       }
-      UI.toast('Copiado: ' + texto, 'ok');
+      UI.toast(msg || 'Copiado: ' + texto, 'ok');
     }
   };
   // Efeito de toque: onda saindo do ponto onde o dedo encostou + vibração curta
