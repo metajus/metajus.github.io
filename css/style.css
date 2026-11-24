@@ -535,3 +535,71 @@ svg.graf path[data-tip]:hover, svg.graf circle[data-tip]:hover { filter: brightn
 .aud-tit small, .aud-conf summary small { color: var(--suave); font-weight: 500; font-size: 12.5px; }
 .aud-conf { margin-top: 12px; }
 .aud-conf summary { cursor: pointer; font-weight: 700; }
+
+/* ---------- Listas de cumprimento (v10) ---------- */
+svg.graf.rosca { width: auto; display: block; margin: 0; flex: none; }
+svg.graf.rosca circle[data-tip] { transition: stroke-dasharray .6s cubic-bezier(.3,.9,.3,1), opacity .2s; }
+svg.graf.rosca .r-centro { fill: #eef2fa; font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+svg.graf.rosca .r-sub { fill: var(--suave); font-size: 9.5px; font-weight: 600; }
+.modulo.tar .mod-ic { background: linear-gradient(160deg, #1f9e6e, #13744f); }
+.lista-tar { display: flex; align-items: center; gap: 14px; text-decoration: none; color: var(--texto); padding: 14px; }
+.lista-tar:active { transform: scale(.985); }
+.lista-tar .lt-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.lista-tar .lt-info b { font-size: 16px; line-height: 1.25; }
+.lista-tar .lt-info small { color: var(--suave); font-size: 13px; }
+.lista-tar .lt-info .selo { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; }
+.lista-tar .selo .ic svg { width: 13px; height: 13px; }
+.selo.aud { background: rgba(25, 158, 112, .16); color: #8fe3c2; border-color: rgba(25, 158, 112, .4); }
+.lt-meus { font-size: 13px; color: #cfe0ff; }
+.lt-seta { transform: rotate(180deg); color: var(--suave); }
+.lista-tar.encerrada { opacity: .7; }
+.tar-fechadas summary { cursor: pointer; color: var(--suave); font-weight: 700; padding: 10px 4px; }
+.nova-tar label.arquivo { cursor: pointer; }
+.nova-tar label.arquivo input { display: none !important; }
+.tar-prev { margin-top: 12px; animation: entrar .4s cubic-bezier(.2,.8,.2,1) both; }
+.tar-prev textarea { width: 100%; }
+.tar-tipo-esc { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tar-tipo-esc .opcao { margin: 0; cursor: pointer; }
+.tar-tipo-esc .opcao { position: relative; }
+.tar-tipo-esc .opcao input { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; padding: 0; margin: 0; }
+.tar-tipo-esc .opcao b { font-size: 15px; color: var(--texto); }
+.tar-tipo-esc .opcao > span { display: flex; flex-direction: column; gap: 4px; height: 100%; padding: 12px; border-radius: 14px;
+  border: 1px solid var(--borda); background: #0a1426; transition: border-color .2s, background .2s, box-shadow .2s; }
+.tar-tipo-esc .opcao small { color: var(--suave); font-size: 12.5px; line-height: 1.35; }
+.tar-tipo-esc .opcao input:checked + span .ic { color: var(--acento); }
+.tar-tipo-esc .opcao input:checked + span { border-color: var(--acento); background: rgba(47, 111, 230, .14); box-shadow: 0 0 0 2px rgba(47, 111, 230, .35) inset; }
+.tar-oque p { margin: 6px 0; }
+.tar-and { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.tar-and-num { flex: 1; min-width: 170px; display: flex; flex-direction: column; gap: 8px; }
+.tar-and-num > div:not(.tar-meu) { display: grid; grid-template-columns: 12px 1fr auto; align-items: center; gap: 8px; font-size: 14px; color: #d5ddef; }
+.tar-and-num i { width: 12px; height: 12px; border-radius: 4px; display: block; }
+.tar-and-num b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.tar-meu { margin-top: 4px; padding: 8px 10px; border-radius: 10px; background: rgba(77, 141, 255, .1); border: 1px solid rgba(77, 141, 255, .25); font-size: 14px; }
+.tar-finais { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
+.tar-final { position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px 7px;
+  border-radius: 14px; border: 1px solid var(--borda); background: #0a1426; color: var(--texto); font: inherit; cursor: pointer;
+  transition: border-color .2s, background .2s, transform .12s; }
+.tar-final:active { transform: scale(.95); }
+.tar-final b { font-size: 15px; }
+.tar-final small { font-size: 11.5px; color: var(--suave); font-variant-numeric: tabular-nums; }
+.tar-final.eh-meu { border-color: rgba(77, 141, 255, .45); }
+.tar-final.eh-meu::after { content: ''; position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--acento); }
+.tar-final.on { background: rgba(47, 111, 230, .2); border-color: var(--acento); box-shadow: 0 0 0 2px rgba(47, 111, 230, .4) inset; }
+.segmentado button small { font-weight: 600; opacity: .8; }
+#tarListaCartao { scroll-margin-top: 70px; }
+#tarListaCartao .abas { margin-bottom: 10px; }
+.tar-item .seqb { background: rgba(158, 171, 198, .14); color: #d5ddef; }
+.tar-item .seqb.meu { background: rgba(77, 141, 255, .2); color: #cfe0ff; }
+.tar-item .tarja { background: rgba(250, 178, 25, .12); color: #ffd58a; font-weight: 600; }
+.tar-prov { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(250, 178, 25, .08); border: 1px solid rgba(250, 178, 25, .25); font-size: 14px; display: flex; gap: 6px; }
+.tar-tipos { margin-top: 10px; border-radius: 12px; }
+.tar-tipos .rotulo { margin: 0 0 6px; display: block; text-transform: none; letter-spacing: 0; font-size: 13px; }
+.tar-tipos .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tar-tipos .chip { font-size: 13.5px; font-weight: 700; padding: 9px 12px; }
+.tar-tipos.chamar { animation: chamar .7s ease; }
+@keyframes chamar { 0%, 100% { box-shadow: none; transform: none; } 20%, 60% { box-shadow: 0 0 0 2px var(--alerta, #fab219); transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+.btn.mini.grande { padding: 10px 18px; font-weight: 800; }
+.tar-item.saindo { animation: sair .32s ease forwards; }
+@keyframes sair { to { opacity: 0; transform: translateX(40px) scale(.97); } }
+.tar-admin .acoes { display: flex; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 420px) { .tar-tipo-esc { grid-template-columns: 1fr; } .linha2 { grid-template-columns: 1fr; } }
