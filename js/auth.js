@@ -28,7 +28,10 @@
     grafico: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
     prancheta: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 11.5l2 2 4-4M9 17h6"/>',
     calendario: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
-    mais: '<path d="M12 5v14M5 12h14"/>'
+    mais: '<path d="M12 5v14M5 12h14"/>',
+    imprimir: '<path d="M7 9V3h10v6M7 17H5a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2h-2"/><rect x="7" y="14" width="10" height="7" rx="1"/>',
+    busca: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+    editar: '<path d="M4 20h4L19 9l-4-4L4 16v4z"/>'
   };
   const ic = (nome) => `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[nome] || ''}</svg></span>`;
 

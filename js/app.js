@@ -6,6 +6,7 @@
 //  #/gabinete   4. Painel do Gabinete e Comandos
 //  #/repasses   5. Repasse de Diligências
 //  #/tarefas    Listas de cumprimento (Corregedoria, chefia) por sequencial
+//  #/atendimentos Área de Atendimentos: certidões e documentos do balcão, prontos para imprimir
 //  #/admin      3. Perfis, aprovações, QR Code e atualização da base
 //  #/conta      Minha conta
 // ============================================================
@@ -193,6 +194,7 @@
           <a class="modulo" href="#/filas"><span class="mod-ic">${ic('lista')}</span><b>Filas de Cumprimento</b><small>Onde os processos estão parados no SAJ</small></a>
           <a class="modulo" href="#/meta"><span class="mod-ic">${ic('grafico')}</span><b>Painel e Meta</b><small>Gráficos da meta, evolução e acervo</small></a>
           <a class="modulo m2" href="#/meta2"><span class="mod-ic">${ic('alvo')}</span><b>Meta 2 · CNJ</b><small>${m2c ? `${Graficos.fmt(Math.round(m2c.pct * 10) / 10)}% · ${m2c.saldo} antigos pendentes` : 'Processos mais antigos'}</small>${m2meus ? `<span class="contador">${m2meus}</span>` : ''}</a>
+          <a class="modulo atd" href="#/atendimentos"><span class="mod-ic">${ic('imprimir')}</span><b>Área de Atendimentos</b><small>Certidões e documentos do balcão, prontos para imprimir</small></a>
           <a class="modulo tar" href="#/tarefas"><span class="mod-ic">${ic('prancheta')}</span><b>Listas de Cumprimento</b><small>${tar.listas ? `${tar.listas} lista(s) da Corregedoria e chefia` : 'Pedidos da Corregedoria e da chefia'}</small>${tar.meus ? `<span class="contador">${tar.meus}</span>` : ''}</a>
           <a class="modulo" href="#/gabinete"><span class="mod-ic">${ic('balanca')}</span><b>Gabinete e Comandos</b><small>Conclusos e determinações</small>${av.comandos.length ? `<span class="contador">${av.comandos.length}</span>` : ''}</a>
           <a class="modulo" href="#/repasses"><span class="mod-ic">${ic('setas')}</span><b>Repasse de Diligências</b><small>SISBAJUD, RENAJUD, ofícios…</small>${av.repasses.length ? `<span class="contador">${av.repasses.length}</span>` : ''}</a>
@@ -330,7 +332,13 @@
     lista.sort((a, b) => (m2.has(b.numero) - m2.has(a.numero)) || b.faixa - a.faixa || a.numero.localeCompare(b.numero));
 
     const feitos = lista.filter((p) => cumpridos.has(p.numero)).length;
-    $('#pResumo').innerHTML = `${lista.length} processo(s) · ${feitos} cumprido(s)` +
+    IMPRESSOES.parados = () => ({
+      titulo: 'Processos parados' + (st.fila ? ' — ' + st.fila : ''),
+      sub: `${st.local} · finais ${UI.listaSeq(st.seqs.filter((x) => x >= 0))}${st.faixa != null ? ' · ' + rotuloFaixa(st.faixa) + (st.eAcima ? ' ou mais' : '') : ''}${st.soMeta2 ? ' · só Meta 2' : ''}`,
+      colunas: [{ rot: 'Processo' }, { rot: 'Seq.' }, { rot: 'Parado há' }, { rot: 'Fila' }, { rot: 'Últ. mov.' }, { rot: 'Situação' }],
+      linhas: lista.map((p) => { const c = cumpridos.get(p.numero); return [p.numero, p.sequencial == null ? '—' : p.sequencial, p.faixa_texto || rotuloFaixa(p.faixa), p.fila || '', p.ultima_mov ? p.ultima_mov.split('-').reverse().join('/') : '', (m2.has(p.numero) ? 'Meta 2. ' : '') + (c ? 'Cumprido por ' + nomeUsuario(c.usuario_id) : '')]; })
+    });
+    $('#pResumo').innerHTML = botaoImprimir('parados') + ' ' + `${lista.length} processo(s) · ${feitos} cumprido(s)` +
       (lista.length ? ` <span class="barra fina"><span style="width:${Math.round(feitos / lista.length * 100)}%"></span></span>` : '');
 
     if (!S.processos.length) {
@@ -716,7 +724,13 @@
         (!estadoM2.meus || (x.p && seqs.has(x.p.sequencial))) &&
         (!txt || (dig && x.numero.replace(/\D/g, '').includes(dig)) || (x.classe + ' ' + x.assunto).toLowerCase().includes(txt)));
       const cumpridos = new Map(S.cumpridos.map((k) => [k.numero, k]));
-      $('#m2Resumo').innerHTML = `${lista.length} processo(s)`;
+      IMPRESSOES.meta2 = () => ({
+        titulo: 'Meta 2 do CNJ — processos antigos pendentes',
+        sub: `${estadoM2.aba === 'todos' ? 'Todos' : estadoM2.aba}${estadoM2.meus ? ' · meus finais' : ''} · referência ${ref}`,
+        colunas: [{ rot: 'Processo' }, { rot: 'Ano' }, { rot: 'Seq.' }, { rot: 'Onde está' }, { rot: 'Classe · assunto' }],
+        linhas: lista.map((x) => [x.numero, x.ano, x.p && x.p.sequencial != null ? x.p.sequencial : '—', x.p ? (x.p.fila || x.p.local || '') : 'Andando no SAJ', [x.classe, x.assunto].filter(Boolean).join(' · ')])
+      });
+      $('#m2Resumo').innerHTML = `${botaoImprimir('meta2')} ${lista.length} processo(s)`;
       $('#m2Lista').innerHTML = lista.length ? lista.slice(0, estadoM2.limite).map((x) => x.p
         ? itemProcesso(x.p, cumpridos.get(x.numero)).replace('<div class="proc-fila">', `<div class="proc-classe">${esc(x.classe)}${x.assunto ? ' · ' + esc(x.assunto) : ''}</div><div class="proc-fila">`)
         : `<div class="proc" data-n="${esc(x.numero)}">
@@ -741,6 +755,411 @@
     redesenharM2 = desenhar;
     desenhar();
     animarNumeros($('#app'));
+  }
+
+  // ======================= ÁREA DE ATENDIMENTOS (certidões e documentos do balcão) =======================
+  //  #/atendimentos           lista de documentos, com busca
+  //  #/atendimentos?doc=ID    formulário + folha oficial ao vivo + Imprimir
+  // LGPD: nada do que é digitado aqui é enviado ou guardado; some ao sair da tela.
+  const CARGOS_ASSIN = ['Servidor Judiciário', 'Servidora Judiciária', 'Chefe de Secretaria', 'Analista Judiciário', 'Técnico Judiciário', 'Estagiário(a)'];
+  const semAcento = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const so = (v) => String(v || '').replace(/\D/g, '');
+  const MASCARA = {
+    cpf: (v) => so(v).slice(0, 11).replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2'),
+    cnpj: (v) => so(v).slice(0, 14).replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2'),
+    processo: (v) => {
+      const d = so(v).slice(0, 20); let r = d.slice(0, 7);
+      if (d.length > 7) r += '-' + d.slice(7, 9);
+      if (d.length > 9) r += '.' + d.slice(9, 13);
+      if (d.length > 13) r += '.' + d.slice(13, 14);
+      if (d.length > 14) r += '.' + d.slice(14, 16);
+      if (d.length > 16) r += '.' + d.slice(16, 20);
+      return r;
+    },
+    telefone: (v) => {
+      const d = so(v).slice(0, 11);
+      if (d.length <= 2) return d.length ? '(' + d : '';
+      if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+      if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+      return `(${d.slice(0, 2)}) ${d.slice(2, 3)} ${d.slice(3, 7)}-${d.slice(7)}`;
+    }
+  };
+  function cpfValido(v) {
+    const c = so(v); if (c.length !== 11 || /^(\d)\1+$/.test(c)) return false;
+    const dv = (n) => { let s = 0; for (let i = 0; i < n; i++) s += +c[i] * (n + 1 - i); const r = (s * 10) % 11; return r === 10 ? 0 : r; };
+    return dv(9) === +c[9] && dv(10) === +c[10];
+  }
+  const avisoCampo = (c, v) => {
+    if (!v) return '';
+    if (c.tipo === 'cpf' && !cpfValido(v)) return 'Confira o CPF: os números não batem.';
+    if (c.tipo === 'processo' && so(v).length !== 20) return 'O número do processo tem 20 dígitos.';
+    if (c.tipo === 'cnpj' && so(v).length !== 14) return 'O CNPJ tem 14 dígitos.';
+    return '';
+  };
+
+  let estadoAtd = { busca: '' };
+
+  function telaAtendimentos() {
+    const docId = consultaHash().get('doc');
+    if (docId) return telaAtendimentoDoc(docId);
+    UI.topo('Área de Atendimentos', 'Certidões e documentos do balcão', true);
+    UI.render(`
+      <section>
+        ${UI.ajuda('atendimentos', 'Como emitir um documento', [
+          'Procure o documento que a pessoa pediu: digite uma palavra (ex.: <b>comparecimento</b>, <b>INSS</b>, <b>negativa</b>) ou escolha na lista.',
+          'Preencha os dados que aparecem (nome, CPF, nº do processo…). A folha oficial vai se montando sozinha ao lado.',
+          'Confira e toque em <b>Imprimir</b>. No celular, escolha a impressora ou "Salvar como PDF".',
+          'Nada do que você digita fica guardado: ao sair da tela, os dados somem.'
+        ])}
+        <div class="atd-busca">${ic('busca')}<input type="search" id="atdBusca" placeholder="O que a pessoa pediu? Ex.: comparecimento, INSS, negativa…" value="${esc(estadoAtd.busca)}" autocomplete="off"></div>
+        <div id="atdLista"></div>
+      </section>`);
+    const desenhar = () => {
+      const t = semAcento(estadoAtd.busca).trim().split(/\s+/).filter(Boolean);
+      const ok = (m) => !t.length || t.every((p) => semAcento(m.titulo + ' ' + m.desc + ' ' + m.grupo).includes(p));
+      const html = MODELOS_INFO.GRUPOS.map((g) => {
+        const ms = MODELOS.filter((m) => m.grupo === g && ok(m));
+        return ms.length ? `<div class="atd-grupo">${esc(g)}</div><div class="atd-docs">${ms.map((m) => `
+          <a class="cartao atd-doc" href="#/atendimentos?doc=${m.id}"><span class="mod-ic">${ic(m.icone || 'lista')}</span>
+            <span><b>${esc(m.titulo)}</b><small>${esc(m.desc)}</small></span></a>`).join('')}</div>` : '';
+      }).join('');
+      $('#atdLista').innerHTML = html || `<div class="vazio">${ic('busca')}<p>Nenhum documento com essa palavra.</p><p class="dica">Use a <a href="#/atendimentos?doc=certidao-livre">Certidão em branco</a> para casos diferentes.</p></div>`;
+    };
+    $('#atdBusca').addEventListener('input', (e) => { estadoAtd.busca = e.target.value; desenhar(); });
+    desenhar();
+  }
+
+  function telaAtendimentoDoc(id) {
+    const m = MODELOS.find((x) => x.id === id);
+    if (!m) { location.hash = '#/atendimentos'; return; }
+    UI.topo(m.titulo, 'Área de Atendimentos', true);
+    const ini = typeof m.valores === 'function' ? m.valores() : (m.valores || {});
+    const dados = { ...ini };
+    m.campos.forEach((c) => { if (c.tipo === 'opcao' && dados[c.id] == null && c.obr) dados[c.id] = c.ops[0]; });
+    let cargo = ''; try { cargo = localStorage.getItem('mj_cargo') || ''; } catch (_) {}
+    const ass = { nome: S.perfil.nome, cargo: cargo || 'Servidor Judiciário' };
+    let dataDoc = Impressao.hojeISO();
+    let modo = 'auto';
+
+    const campoHTML = (c) => {
+      if (c.tipo === 'secao') return `<div class="secao" data-c="${c.id}">${esc(c.rot)}</div>`;
+      const v = dados[c.id] == null ? '' : dados[c.id];
+      const obr = c.obr ? '<span class="obr" title="obrigatório">*</span>' : '';
+      let input;
+      if (c.tipo === 'opcao' && c.ops.length <= 3) {
+        input = `<div class="chips" role="radiogroup">${c.ops.map((o) => `<button type="button" class="chip${v === o ? ' on' : ''}" data-op="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
+        return `<div class="campo" data-c="${c.id}"><span class="rot">${esc(c.rot)}${obr}</span>${input}</div>`;
+      }
+      if (c.tipo === 'opcao') input = `<select name="${c.id}">${c.obr ? '' : '<option value=""></option>'}${c.ops.map((o) => `<option${v === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+      else if (c.tipo === 'sim') return `<div class="campo" data-c="${c.id}"><label class="sim"><span>${esc(c.rot)}</span><input type="checkbox" name="${c.id}"${v ? ' checked' : ''}></label></div>`;
+      else if (c.tipo === 'longo') input = `<textarea name="${c.id}" placeholder="${esc(c.ex || '')}">${esc(v)}</textarea>`;
+      else {
+        const tipo = c.tipo === 'data' ? 'date' : c.tipo === 'hora' ? 'time' : 'text';
+        const modo = ['cpf', 'cnpj', 'processo', 'telefone', 'numero'].includes(c.tipo) ? ' inputmode="numeric"' : '';
+        const cap = c.tipo === 'nome' ? ' autocapitalize="words"' : '';
+        const ph = c.ex || ({ cpf: '000.000.000-00', cnpj: '00.000.000/0000-00', processo: '0000000-00.0000.8.02.0034', telefone: '(82) 9 0000-0000' })[c.tipo] || '';
+        input = `<input type="${tipo}" name="${c.id}" value="${esc(v)}" placeholder="${esc(ph)}"${modo}${cap} autocomplete="off" spellcheck="${c.tipo === 'nome' || c.tipo === 'texto' || c.tipo === 'longo'}">`;
+      }
+      return `<div class="campo" data-c="${c.id}"><label for="f_${c.id}">${esc(c.rot)}${obr}</label>${input.replace(/name="/, `id="f_${c.id}" name="`)}<div class="aviso"></div></div>`;
+    };
+
+    UI.render(`
+      <section class="tela-atd">
+        <div class="atd-layout">
+          <div>
+            <div class="cartao atd-form" id="atdForm">
+              <div class="cartao-cab"><h3 class="atd-passo"><span class="num">1</span> Dados da pessoa</h3></div>
+              <p class="dica">${esc(m.desc)}</p>
+              <div id="atdCampos"></div>
+            </div>
+            <div class="cartao atd-form">
+              <div class="cartao-cab"><h3 class="atd-passo"><span class="num">2</span> Quem assina e data</h3></div>
+              <div class="campo"><label for="aNome">Nome de quem assina</label><input id="aNome" value="${esc(ass.nome)}" autocapitalize="words"></div>
+              <div class="campo"><label for="aCargo">Cargo</label><select id="aCargo">${[...new Set([ass.cargo, ...CARGOS_ASSIN])].map((c) => `<option${c === ass.cargo ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+              <div class="campo"><label for="aData">Data do documento</label><input type="date" id="aData" value="${dataDoc}"></div>
+            </div>
+          </div>
+          <div class="cartao">
+            <div class="atd-previa-cab">
+              <h3 class="atd-passo"><span class="num">3</span> Confira e imprima</h3>
+              <button class="btn mini" id="atdEditar">${ic('editar')} Ajustar texto</button>
+            </div>
+            <p class="dica" id="atdDicaEdit">Os campos em <mark style="background:#fff1a8;color:#6b4e00;padding:0 3px;border-radius:3px">amarelo</mark> ainda faltam preencher.</p>
+            <div class="atd-previa" id="atdPrevia"><div class="escala" id="atdEscala"></div></div>
+            <div class="atd-acoes">
+              <button class="btn primario" id="atdImprimir">${ic('imprimir')} Imprimir</button>
+              <button class="btn secundario" id="atdLimpar">Limpar e fazer outro</button>
+            </div>
+            <p class="atd-lgpd">${ic('cadeado')} <span>Os dados digitados não são enviados nem guardados. Ao sair desta tela, eles somem.</span></p>
+          </div>
+        </div>
+      </section>`);
+
+    const camposVisiveis = () => m.campos.filter((c) => !c.se || c.se(dados));
+    const desenharCampos = () => {
+      const foco = document.activeElement && document.activeElement.name;
+      $('#atdCampos').innerHTML = camposVisiveis().map(campoHTML).join('');
+      if (foco && $(`#atdCampos [name="${foco}"]`)) $(`#atdCampos [name="${foco}"]`).focus();
+    };
+    const ajustarEscala = () => {
+      const caixa = $('#atdPrevia'), alvo = $('#atdEscala'); if (!caixa || !alvo.firstElementChild) return;
+      const folha = alvo.firstElementChild;
+      const larg = caixa.clientWidth - 20, esc1 = Math.min(1, larg / folha.offsetWidth);
+      alvo.style.transform = `scale(${esc1})`;
+      alvo.style.height = (folha.offsetHeight * esc1) + 'px';
+      alvo.style.width = (folha.offsetWidth * esc1) + 'px';
+    };
+    const desenharFolha = () => {
+      if (modo !== 'auto') return;
+      $('#atdEscala').innerHTML = Impressao.documento(m, dados, ass, dataDoc);
+      $('#atdEscala').style.height = '';
+      requestAnimationFrame(ajustarEscala);
+      $$('#atdEscala img').forEach((i) => { if (!i.complete) i.onload = ajustarEscala; });
+    };
+    desenharCampos(); desenharFolha();
+    window.addEventListener('resize', ajustarEscala);
+
+    const atualizar = (nome, valor, redesenharCampos) => {
+      dados[nome] = valor;
+      if (redesenharCampos) desenharCampos();
+      desenharFolha();
+    };
+    $('#atdCampos').addEventListener('input', (e) => {
+      const el = e.target; if (!el.name) return;
+      const c = m.campos.find((x) => x.id === el.name); if (!c) return;
+      if (MASCARA[c.tipo]) { const p = el.selectionStart, antes = el.value.length; el.value = MASCARA[c.tipo](el.value); const dif = el.value.length - antes; try { el.setSelectionRange(p + dif, p + dif); } catch (_) {} }
+      if (c.tipo === 'numero') el.value = el.value.replace(/[^\d/]/g, '');
+      const caixa = el.closest('.campo'); caixa.classList.remove('erro');
+      atualizar(c.id, c.tipo === 'sim' ? el.checked : el.value, c.tipo === 'sim');
+    });
+    $('#atdCampos').addEventListener('change', (e) => {
+      const el = e.target; if (!el.name) return;
+      const c = m.campos.find((x) => x.id === el.name);
+      if (c && c.tipo === 'sim') { atualizar(c.id, el.checked, true); return; }
+      if (c) { const av = el.closest('.campo').querySelector('.aviso'); if (av) av.textContent = avisoCampo(c, el.value); }
+    });
+    $('#atdCampos').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-op]'); if (!b) return;
+      const id = b.closest('.campo').dataset.c;
+      $$('.chip', b.parentNode).forEach((x) => x.classList.toggle('on', x === b));
+      b.closest('.campo').classList.remove('erro');
+      atualizar(id, b.dataset.op, true);
+    });
+    $('#aNome').addEventListener('input', (e) => { ass.nome = e.target.value; desenharFolha(); });
+    $('#aCargo').addEventListener('change', (e) => { ass.cargo = e.target.value; try { localStorage.setItem('mj_cargo', ass.cargo); } catch (_) {} desenharFolha(); });
+    $('#aData').addEventListener('change', (e) => { dataDoc = e.target.value || Impressao.hojeISO(); desenharFolha(); });
+
+    // modo: 'auto' (folha segue o formulário) | 'editando' | 'ajustado' (ajustes à mão, folha congelada)
+    $('#atdEditar').addEventListener('click', () => {
+      const btn = $('#atdEditar');
+      if (modo !== 'editando') {
+        modo = 'editando';
+        $$('#atdEscala .fl-p, #atdEscala .fl-tit, #atdEscala .fl-sub, #atdEscala .fl-data, #atdEscala .fl-nome, #atdEscala .fl-cargo, #atdEscala .fl-of-dest, #atdEscala .fl-of-ass, #atdEscala .fl-of-voc, #atdEscala .fl-of-num').forEach((p) => p.setAttribute('contenteditable', 'true'));
+        btn.innerHTML = `${ic('check')} Concluir ajustes`;
+        $('#atdDicaEdit').innerHTML = 'Toque no texto da folha para corrigir o que quiser. Enquanto estiver ajustando, mudanças no formulário não aparecem na folha.';
+        $('#atdForm').style.opacity = '.55';
+        const p1 = $('#atdEscala .fl-p'); if (p1) p1.focus();
+      } else {
+        modo = 'ajustado';
+        $$('#atdEscala [contenteditable]').forEach((p) => p.removeAttribute('contenteditable'));
+        btn.innerHTML = `${ic('editar')} Ajustar texto`;
+        $('#atdForm').style.opacity = '';
+        $('#atdDicaEdit').innerHTML = 'Ajustes feitos à mão. <button class="btn mini" id="atdRefazer">Desfazer ajustes</button>';
+        $('#atdRefazer').addEventListener('click', () => { modo = 'auto'; desenharFolha(); $('#atdDicaEdit').textContent = 'A folha voltou a seguir o formulário.'; });
+      }
+    });
+
+    $('#atdImprimir').addEventListener('click', () => {
+      const faltam = camposVisiveis().filter((c) => c.obr && c.tipo !== 'secao' && c.tipo !== 'sim' && !String(dados[c.id] || '').trim());
+      $$('#atdCampos .campo').forEach((x) => x.classList.toggle('erro', faltam.some((c) => c.id === x.dataset.c)));
+      if (modo === 'editando') { $('#atdEditar').click(); }
+      if (faltam.length && modo === 'auto') {
+        UI.toast('Falta preencher: ' + faltam.map((c) => c.rot.replace(/\s*\(.*?\)/g, '')).join(', '), 'erro');
+        const el = $(`#atdCampos [data-c="${faltam[0].id}"]`);
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); const i = el.querySelector('input,select,textarea'); if (i) setTimeout(() => { const a = document.activeElement; if (!a || !a.closest || !a.closest('#atdCampos')) i.focus(); }, 350); }
+        return;
+      }
+      if (!ass.nome.trim()) { UI.toast('Informe o nome de quem assina.', 'erro'); $('#aNome').focus(); return; }
+      const html = $('#atdEscala').innerHTML;
+      const nomeArq = (m.titulo.split(' — ')[0] + ' - ' + (dados.nome || dados.requerente || dados.razao || dados.adv || '')).trim().replace(/\s+-\s*$/, '');
+      Impressao.imprimir(html, { titulo: nomeArq, tipo: 'doc' });
+      if (navigator.standalone) UI.toast('Se a impressão não abrir, toque em Compartilhar › Imprimir.', 'ok');
+    });
+    $('#atdLimpar').addEventListener('click', () => {
+      if (!confirmar('Apagar os dados digitados e começar outro documento?')) return;
+      rotear();
+    });
+  }
+
+  // ----------------------- Impressão de listas (filas, parados, metas, listas) -----------------------
+  const IMPRESSOES = {};
+  const botaoImprimir = (chave, texto) => `<button type="button" class="btn mini btn-imprimir" data-imprimir="${chave}">${ic('imprimir')} ${texto || 'Imprimir'}</button>`;
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-imprimir]'); if (!b) return;
+    const k = b.dataset.imprimir;
+    if (k === 'parados') { e.preventDefault(); e.stopPropagation(); painelParados(); return; }
+    if (k === 'fila' || k === 'filasProc') { e.preventDefault(); e.stopPropagation(); painelFilas(k === 'fila' ? estadoFilas.aberta : null); return; }
+    const gerar = IMPRESSOES[k]; if (!gerar) return;
+    e.preventDefault(); e.stopPropagation();
+    const t = gerar();
+    if (!t || !t.linhas.length) { UI.toast('Não há nada para imprimir com estes filtros.', 'erro'); return; }
+    if (t.linhas.length > 150 && !confirmar(`São ${t.linhas.length.toLocaleString('pt-BR')} linhas (cerca de ${Math.ceil(t.linhas.length / 36)} folhas). Imprimir mesmo assim?\n\nDica: use os filtros (seus finais, tempo na fila…) para imprimir só o que precisa.`)) return;
+    Impressao.imprimir(Impressao.tabela({ ...t, por: S.perfil && S.perfil.nome }), { titulo: t.titulo, tipo: 'lista' });
+  }, true);
+
+  // ----------------------- Painel "Imprimir processos" (Filas e Parados) -----------------------
+  // Escolhe as filas (uma, várias ou todas), os finais (sequenciais) e se sai tudo junto,
+  // uma lista por fila ou uma lista por final.
+  //  cfg: { origem, titulo, sub, filas:[{nome, qtd}], filasIniciais, seqsIniciais, colunas, carregar(filasSel) -> [{numero, seq, fila, linha}] }
+  let painelPrefs = (() => { try { return JSON.parse(localStorage.getItem('mj_impr') || '{}'); } catch (_) { return {}; } })();
+  function abrirPainelImpressao(cfg) {
+    const meus = (S.perfil.sequenciais || []).slice();
+    const sel = new Set(cfg.filasIniciais && cfg.filasIniciais.length ? cfg.filasIniciais : cfg.filas.map((f) => f.nome));
+    const seqs = new Set(cfg.seqsIniciais && cfg.seqsIniciais.length ? cfg.seqsIniciais : (meus.length ? meus : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, -1]));
+    let modo = painelPrefs.modo || 'junto';
+    const fundo = document.createElement('div');
+    fundo.className = 'painel-fundo';
+    fundo.innerHTML = `
+      <div class="painel" role="dialog" aria-modal="true" aria-label="Imprimir processos">
+        <div class="painel-cab"><h3>${ic('imprimir')} Imprimir processos</h3><button class="topo-btn" data-p="fechar" aria-label="Fechar">✕</button></div>
+        <div class="painel-corpo">
+          <div class="pi-bloco">
+            <div class="pi-tit"><span class="num">1</span> Quais filas?</div>
+            <div class="pi-atalhos"><button class="btn mini" data-p="todasF">Todas</button><button class="btn mini" data-p="nenhumaF">Nenhuma</button>
+              <input type="search" class="pi-busca" placeholder="Procurar fila…"></div>
+            <div class="pi-filas">${cfg.filas.map((f) => `
+              <label class="pi-fila"><input type="checkbox" value="${esc(f.nome)}"${sel.has(f.nome) ? ' checked' : ''}><span>${esc(f.nome ? f.nome.replace(/^\d+\s*-\s*/, '') : '(sem fila)')}</span><small>${f.qtd.toLocaleString('pt-BR')}</small></label>`).join('')}</div>
+          </div>
+          <div class="pi-bloco">
+            <div class="pi-tit"><span class="num">2</span> Quais finais (sequenciais)?</div>
+            <div class="pi-atalhos">${meus.length ? '<button class="btn mini" data-p="meus">Meus finais</button>' : ''}<button class="btn mini" data-p="todosS">Todos</button></div>
+            <div class="chips pi-seqs">${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, -1].map((n) => `<button type="button" class="chip${seqs.has(n) ? ' on' : ''}" data-s="${n}">${n < 0 ? 'Sem final' : n}</button>`).join('')}</div>
+          </div>
+          <div class="pi-bloco">
+            <div class="pi-tit"><span class="num">3</span> Como sair no papel?</div>
+            <div class="pi-modos">
+              ${[['junto', 'Tudo junto', 'Uma lista só, com a coluna da fila'], ['fila', 'Separado por fila', 'Cada fila começa numa folha nova'], ['final', 'Separado por final', 'Cada final numa folha (bom para entregar a cada servidor)']]
+                .map(([k, t, d]) => `<label class="opcao"><input type="radio" name="piModo" value="${k}"${modo === k ? ' checked' : ''}><span><b>${t}</b><small>${d}</small></span></label>`).join('')}
+            </div>
+          </div>
+        </div>
+        <div class="painel-pe"><span id="piConta" class="dica"></span><button class="btn primario" data-p="imprimir">${ic('imprimir')} Imprimir</button></div>
+      </div>`;
+    document.body.appendChild(fundo);
+    document.body.classList.add('com-painel');
+    const fechar = () => { fundo.remove(); document.body.classList.remove('com-painel'); };
+    const conta = () => {
+      const n = cfg.filas.filter((f) => sel.has(f.nome)).reduce((a, f) => a + f.qtd, 0);
+      $('#piConta', fundo).textContent = `${sel.size} fila(s) · até ${n.toLocaleString('pt-BR')} processos, antes de filtrar os finais`;
+    };
+    conta();
+    fundo.addEventListener('click', async (e) => {
+      if (e.target === fundo) return fechar();
+      const b = e.target.closest('[data-p],[data-s]'); if (!b) return;
+      if (b.dataset.s != null) { const n = +b.dataset.s; seqs.has(n) ? seqs.delete(n) : seqs.add(n); b.classList.toggle('on', seqs.has(n)); return; }
+      const p = b.dataset.p;
+      if (p === 'fechar') return fechar();
+      if (p === 'todasF' || p === 'nenhumaF') {
+        $$('.pi-fila', fundo).forEach((l) => { if (l.style.display === 'none') return; const i = l.querySelector('input'); i.checked = p === 'todasF'; i.checked ? sel.add(i.value) : sel.delete(i.value); });
+        return conta();
+      }
+      if (p === 'meus' || p === 'todosS') {
+        seqs.clear(); (p === 'meus' ? meus : [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, -1]).forEach((n) => seqs.add(n));
+        $$('.pi-seqs .chip', fundo).forEach((c) => c.classList.toggle('on', seqs.has(+c.dataset.s)));
+        return;
+      }
+      if (p === 'imprimir') {
+        if (!sel.size) { UI.toast('Escolha pelo menos uma fila.', 'erro'); return; }
+        if (!seqs.size) { UI.toast('Escolha pelo menos um final.', 'erro'); return; }
+        modo = ($('input[name=piModo]:checked', fundo) || {}).value || 'junto';
+        painelPrefs = { modo }; try { localStorage.setItem('mj_impr', JSON.stringify(painelPrefs)); } catch (_) {}
+        b.disabled = true; b.textContent = 'Preparando…';
+        let rows;
+        try { rows = await cfg.carregar([...sel]); }
+        catch (err) { UI.toast(err.message || String(err), 'erro'); b.disabled = false; b.innerHTML = `${ic('imprimir')} Imprimir`; return; }
+        rows = rows.filter((r) => seqs.has(r.seq == null ? -1 : r.seq));
+        b.disabled = false; b.innerHTML = `${ic('imprimir')} Imprimir`;
+        if (!rows.length) { UI.toast('Nenhum processo com essas filas e finais.', 'erro'); return; }
+        if (rows.length > 150 && !confirmar(`São ${rows.length.toLocaleString('pt-BR')} processos (cerca de ${Math.ceil(rows.length / 36)} folhas). Imprimir mesmo assim?`)) return;
+        const finaisTxt = seqs.size === 11 ? 'todos os finais' : 'finais ' + [...seqs].sort((a, b2) => a - b2).map((n) => n < 0 ? 'sem final' : n).join(', ');
+        const nomeFila = (f) => (f || '(sem fila)').replace(/^\d+\s*-\s*/, '');
+        const por = S.perfil && S.perfil.nome;
+        let html = '';
+        if (modo === 'junto') {
+          const variasFilas = sel.size > 1;
+          html = Impressao.tabela({ titulo: cfg.titulo + (variasFilas ? '' : ' — ' + nomeFila([...sel][0])), sub: `${cfg.sub ? cfg.sub + ' · ' : ''}${variasFilas ? sel.size + ' filas · ' : ''}${finaisTxt}`,
+            colunas: variasFilas ? [...cfg.colunas, { rot: 'Fila' }] : cfg.colunas,
+            linhas: rows.map((r) => variasFilas ? [...r.linha, nomeFila(r.fila)] : r.linha), por });
+        } else {
+          const chave = (r) => modo === 'fila' ? (r.fila || '') : (r.seq == null ? -1 : r.seq);
+          const grupos = new Map();
+          rows.forEach((r) => { const k = chave(r); if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(r); });
+          const ordem = [...grupos.keys()].sort((a, b2) => modo === 'final' ? a - b2 : grupos.get(b2).length - grupos.get(a).length);
+          html = ordem.map((k) => {
+            const rs = grupos.get(k);
+            const titulo = modo === 'fila' ? nomeFila(k) : (k < 0 ? 'Processos sem final' : 'Final ' + k);
+            return Impressao.tabela({ titulo, sub: `${cfg.titulo}${cfg.sub ? ' · ' + cfg.sub : ''} · ${modo === 'fila' ? finaisTxt : sel.size + ' fila(s)'}`,
+              colunas: modo === 'final' ? [...cfg.colunas, { rot: 'Fila' }] : cfg.colunas,
+              linhas: rs.map((r) => modo === 'final' ? [...r.linha, nomeFila(r.fila)] : r.linha), por });
+          }).join('');
+        }
+        fechar();
+        Impressao.imprimir(html, { titulo: cfg.titulo, tipo: 'lista' });
+      }
+    });
+    $('.pi-busca', fundo).addEventListener('input', (e) => {
+      const t = semAcento(e.target.value);
+      $$('.pi-fila', fundo).forEach((l) => { l.style.display = !t || semAcento(l.textContent).includes(t) ? '' : 'none'; });
+    });
+    $('.pi-filas', fundo).addEventListener('change', (e) => { const i = e.target; if (i.type !== 'checkbox') return; i.checked ? sel.add(i.value) : sel.delete(i.value); conta(); });
+  }
+
+  // Abre o painel a partir da tela de Filas
+  function painelFilas(filaInicial) {
+    const itens = S.filas.itens;
+    const tot = new Map();
+    itens.forEach((x) => tot.set(x.fila, (tot.get(x.fila) || 0) + x.qtd));
+    const filas = [...tot.entries()].sort((a, b) => b[1] - a[1]).map(([nome, qtd]) => ({ nome, qtd }));
+    const acervo = new Map(S.processos.map((p) => [p.numero, p]));
+    const m2 = m2Mapa();
+    const st = estadoFilas;
+    const seqIni = st.seq === 'meus' ? (S.perfil.sequenciais || []) : /^\d$/.test(st.seq) ? [+st.seq] : st.seq === 'sem' ? [-1] : null;
+    abrirPainelImpressao({
+      titulo: 'Filas de Cumprimento', sub: 'mais antigos na fila primeiro',
+      filas, filasIniciais: filaInicial ? [filaInicial] : null, seqsIniciais: seqIni,
+      colunas: [{ rot: 'Processo' }, { rot: 'Seq.' }, { rot: 'Tempo na fila' }, { rot: 'Na fila desde' }, { rot: 'Classe · assunto' }],
+      carregar: async (sel) => {
+        const rows = await procsDasFilas(sel);
+        if (!rows.length) throw new Error('A lista de processos das filas ainda não foi importada (Administração › Fluxo e Fila).');
+        return rows.map((r) => {
+          const p = acervo.get(r.numero), seq = p && p.sequencial != null ? p.sequencial : null;
+          return { numero: r.numero, seq, fila: r.fila, linha: [r.numero, seq != null ? seq : '—', r.faixa || '', dataBR(r.entrada), [r.classe, r.assunto].filter(Boolean).join(' · ') + (m2.has(r.numero) ? ' (Meta 2)' : '')] };
+        });
+      }
+    });
+  }
+
+  // Abre o painel a partir da tela de Processos Parados
+  function painelParados() {
+    const st = estadoParados;
+    const base = S.processos.filter((p) => p.local === st.local);
+    const cont = new Map();
+    base.forEach((p) => cont.set(p.fila || '', (cont.get(p.fila || '') || 0) + 1));
+    const filas = [...cont.entries()].sort((a, b) => b[1] - a[1]).map(([nome, qtd]) => ({ nome, qtd }));
+    const cumpridos = new Map(S.cumpridos.map((c) => [c.numero, c]));
+    const m2 = m2Mapa();
+    abrirPainelImpressao({
+      titulo: 'Processos parados', sub: st.local + (st.soMeta2 ? ' · só Meta 2' : '') + ' · mais parados primeiro',
+      filas, filasIniciais: st.fila ? [st.fila] : null, seqsIniciais: st.seqs,
+      colunas: [{ rot: 'Processo' }, { rot: 'Seq.' }, { rot: 'Parado há' }, { rot: 'Últ. mov.' }, { rot: 'Situação' }],
+      carregar: async (sel) => {
+        const s = new Set(sel);
+        return base.filter((p) => s.has(p.fila || '') && (!st.soMeta2 || m2.has(p.numero)))
+          .sort((a, b) => b.faixa - a.faixa || a.numero.localeCompare(b.numero))
+          .map((p) => { const c = cumpridos.get(p.numero); return { numero: p.numero, seq: p.sequencial, fila: p.fila,
+            linha: [p.numero, p.sequencial == null ? '—' : p.sequencial, p.faixa_texto || rotuloFaixa(p.faixa), p.ultima_mov ? p.ultima_mov.split('-').reverse().join('/') : '', (m2.has(p.numero) ? 'Meta 2. ' : '') + (c ? 'Cumprido por ' + nomeUsuario(c.usuario_id) : '')] }; });
+      }
+    });
   }
 
   // ======================= LISTAS DE CUMPRIMENTO (Corregedoria, chefia…) =======================
@@ -1006,7 +1425,13 @@
       const iv = segs.findIndex((s) => s[0] === st.ver);
       $('#tarVer').style.setProperty('--seg', iv);
       $('#tarVer').innerHTML = segs.map(([k, t, n]) => `<button class="${st.ver === k ? 'on' : ''}" data-v="${k}" role="tab">${t} <small>${n}</small></button>`).join('') + '<span class="seg-ind"></span>';
-      $('#tarResumo').innerHTML = `${lista.length} processo(s) ${rotuloSeq()}${lista.length && st.ver !== 'feito' ? ` <button class="btn mini" data-tacao="copiarTodos">${ic('copiar')} Copiar os números</button>` : ''}`;
+      IMPRESSOES.tarefa = () => ({
+        titulo: l.titulo,
+        sub: `${l.origem ? l.origem + ' · ' : ''}${st.ver === 'falta' ? 'falta fazer' : st.ver === 'feito' ? (aud ? 'pautadas' : 'feitos') : 'todos'} · ${rotuloSeq()}${st.area !== 'Todas' ? ' · ' + st.area : ''}`,
+        colunas: [{ rot: 'Processo' }, { rot: 'Final' }, { rot: 'Área' }, { rot: 'Dias', num: true }, ...(aud ? [{ rot: 'Audiência' }] : []), { rot: 'Situação' }],
+        linhas: lista.map((x) => [x.numero, x.sequencial == null ? '—' : x.sequencial, x.area || '', x.dias == null ? '' : x.dias, ...(aud ? [x.aud_tipo || ''] : []), x.status === 'feito' ? verboFeito(l) + ' — ' + nomeUsuario(x.feito_por) : 'Falta fazer'])
+      });
+      $('#tarResumo').innerHTML = `${botaoImprimir('tarefa')} ${lista.length} processo(s) ${rotuloSeq()}${lista.length && st.ver !== 'feito' ? ` <button class="btn mini" data-tacao="copiarTodos">${ic('copiar')} Copiar os números</button>` : ''}`;
       if (!lista.length) {
         $('#tarLista').innerHTML = `<div class="vazio">${st.ver === 'falta' && base.length ? '&#127881; Tudo feito por aqui. Bom trabalho!' : 'Nenhum processo com estes filtros.'}</div>`;
         return;
@@ -1168,6 +1593,7 @@
           <div class="legenda">${ORDEM_FAIXA.slice(0, 5).map((f) => `<span><i style="background:${COR_FAIXA[f]}"></i>${f}</span>`).join('')}</div>
         </div>
         <div id="fAudiencia"></div>
+        <div class="linha-acoes">${botaoImprimir('filasProc', 'Imprimir processos das filas')}${botaoImprimir('filas', 'Imprimir quadro (resumo)')}</div>
         <div class="abas" id="fAbas">${['Todas', 'Cível', 'Criminal', 'Outros'].map((a) => `<button class="aba${estadoFilas.area === a ? ' on' : ''}" data-a="${a}">${a}</button>`).join('')}</div>
         <div id="fLista" class="lista filas"></div>
       </section>`);
@@ -1195,6 +1621,13 @@
     }
     const lista = [...grupos.values()].sort((a, b) => b.total - a.total);
     const mais100 = itens.filter((x) => ordFaixa(x.faixa) >= ordFaixa('+ 100 dias')).reduce((a, b) => a + b.qtd, 0);
+    IMPRESSOES.filas = () => {
+      const fx = ORDEM_FAIXA.filter((f) => lista.some((g) => g.faixas[f]));
+      return { titulo: 'Filas de Cumprimento — ' + (estadoFilas.area === 'Todas' ? 'todas as áreas' : estadoFilas.area),
+        sub: `Referência ${S.filas.referencia ? S.filas.referencia.split('-').reverse().join('/') : '—'} · quantidade de processos por tempo na fila`,
+        colunas: [{ rot: 'Fila' }, { rot: 'Total', num: true }, ...fx.map((f) => ({ rot: f, num: true }))],
+        linhas: lista.map((g) => [g.fila, g.total, ...fx.map((f) => g.faixas[f] || '')]) };
+    };
     $('#fQtdFilas').textContent = lista.length;
     $('#fMais100').textContent = mais100.toLocaleString('pt-BR');
     const procPorFila = {};
@@ -1265,7 +1698,13 @@
         if (t && !((dig && r.numero.replace(/\D/g, '').includes(dig)) || (r.classe + ' ' + r.assunto).toLowerCase().includes(t))) return false;
         return true;
       });
-      $('#fpResumo').textContent = `${lista.length} de ${rows.length} processo(s) · mais antigos na fila primeiro`;
+      IMPRESSOES.fila = () => ({
+        titulo: fila.replace(/^\d+\s*-\s*/, ''),
+        sub: `Fila do SAJ · ${st.seq === 'todos' ? 'todos os sequenciais' : st.seq === 'meus' ? 'meus finais' : st.seq === 'sem' ? 'sem sequencial' : 'final ' + st.seq}${st.faixa ? ' · ' + st.faixa : ''} · mais antigos primeiro`,
+        colunas: [{ rot: 'Processo' }, { rot: 'Seq.' }, { rot: 'Tempo na fila' }, { rot: 'Na fila desde' }, { rot: 'Classe · assunto' }],
+        linhas: lista.map((r) => { const sq = seqDe(r.numero); return [r.numero, sq != null ? sq : '—', r.faixa || '', dataBR(r.entrada), [r.classe, r.assunto].filter(Boolean).join(' · ') + (m2.has(r.numero) ? ' (Meta 2)' : '')]; })
+      });
+      $('#fpResumo').innerHTML = `${botaoImprimir('fila')} ${lista.length} de ${rows.length} processo(s) · mais antigos na fila primeiro`;
       $('#fpLista').innerHTML = lista.slice(0, st.limite).map((r) => {
         const sq = seqDe(r.numero), p = acervo.get(r.numero);
         return `<div class="proc" data-n="${esc(r.numero)}">
@@ -1856,7 +2295,7 @@
       $('#qr').innerHTML = qr.createSvgTag({ cellSize: 6, margin: 24, scalable: true });
     } catch (_) { $('#qr').textContent = 'Biblioteca de QR Code não carregou.'; }
     $('#aCopiarUrl').addEventListener('click', () => UI.copiar(url));
-    $('#aImprimir').addEventListener('click', () => { document.body.classList.add('imprimindo-qr'); window.print(); setTimeout(() => document.body.classList.remove('imprimindo-qr'), 500); });
+    $('#aImprimir').addEventListener('click', () => { document.body.classList.remove('imprimindo', 'imprimindo-doc', 'imprimindo-lista'); document.body.classList.add('imprimindo-qr'); window.print(); setTimeout(() => document.body.classList.remove('imprimindo-qr'), 500); });
 
     // Usuários
     $('#app > section').addEventListener('click', acaoUsuario);
@@ -1981,7 +2420,7 @@
   }
 
   // Transição entre telas: avança deslizando da direita, volta deslizando da esquerda
-  const ORDEM_TELAS = ['/', '/parados', '/filas', '/tarefas', '/meta', '/meta2', '/gabinete', '/repasses', '/admin', '/conta'];
+  const ORDEM_TELAS = ['/', '/atendimentos', '/parados', '/filas', '/tarefas', '/meta', '/meta2', '/gabinete', '/repasses', '/admin', '/conta'];
   let rotaAtual = null;
   function transicao(rota) {
     const app = document.getElementById('app');
@@ -2019,7 +2458,7 @@
     transicao(rota);
     const telas = {
       '/': telaInicio, '/parados': telaParados, '/filas': telaFilas, '/meta2': telaMeta2, '/meta': telaMeta, '/gabinete': telaGabinete,
-      '/repasses': telaRepasses, '/admin': telaAdmin, '/conta': telaConta, '/tarefas': telaTarefas
+      '/repasses': telaRepasses, '/admin': telaAdmin, '/conta': telaConta, '/tarefas': telaTarefas, '/atendimentos': telaAtendimentos
     };
     try { await (telas[rota] || telaInicio)(); }
     catch (e) {
