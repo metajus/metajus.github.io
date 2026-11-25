@@ -14,8 +14,8 @@
 
   const CIDADE = 'Santa Luzia do Norte/AL';
   const FECHO = 'O referido é verdade. Dou fé.';
-  // Texto copiado dos modelos antigos. Atenção: a Lei 8.666/93 foi revogada pela Lei 14.133/2021.
-  const NOTA_VALIDADE = 'Esta certidão só terá validade por 30 (trinta) dias, no seu original, sem rasuras, ressalvado o teor do art. 32 da Lei nº 8.666/93.';
+  // Atualizado: a Lei 8.666/93 (art. 32) foi revogada; equivalente atual é o art. 70, I, da Lei 14.133/2021.
+  const NOTA_VALIDADE = 'Esta certidão só terá validade por 30 (trinta) dias, no seu original, sem rasuras, ressalvado o disposto no art. 70, inciso I, da Lei nº 14.133/2021.';
 
   // Campos que se repetem
   const NOME = { id: 'nome', rot: 'Nome completo da pessoa', tipo: 'nome', obr: true, ex: 'Ex.: Maria José da Silva' };
