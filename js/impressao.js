@@ -12,7 +12,7 @@
   const CAB = {
     l1: 'ESTADO DE ALAGOAS', l2: 'PODER JUDICIÁRIO',
     l3: 'JUÍZO DE DIREITO DA COMARCA DE SANTA LUZIA DO NORTE, ALAGOAS.',
-    email: 'santaluziadonorte@tjal.jus.br', whats: '(82) 99189-1229', tel: '(82) 4009-3894'
+    email: 'santaluzianorte@tjal.jus.br', whats: '(82) 99189-1229', tel: '(82) 4009-3894'
   };
   const ROD = {
     l1: 'CARTÓRIO DO ÚNICO OFÍCIO DE SANTA LUZIA DO NORTE  -  FÓRUM Deoclecio Feitosa',
