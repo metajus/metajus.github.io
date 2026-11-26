@@ -46,10 +46,12 @@
   function datas(txt) {
     const t = numerizar(txt);
     const out = [];
-    const re = /(\d{2})\s?[/.\-]\s?(\d{2})\s?[/.\-]\s?(\d{4})/g; let m;
+    const anoMax = new Date().getFullYear() + 15;
+    // aceita 14/03/1979, 14.03.1979, 14-03-1979 e também 1403/1979 ou 14031979 (a leitura às vezes perde as barras)
+    const re = /(?<!\d)(\d{2})\s?[/.\-]?\s?(\d{2})\s?[/.\-]?\s?((?:19|20)\d{2})(?!\d)/g; let m;
     while ((m = re.exec(t))) {
       const d = +m[1], mm = +m[2], a = +m[3];
-      if (d >= 1 && d <= 31 && mm >= 1 && mm <= 12 && a >= 1900 && a <= new Date().getFullYear() + 15) out.push({ iso: `${m[3]}-${m[2]}-${m[1]}`, a, pos: m.index });
+      if (d >= 1 && d <= 31 && mm >= 1 && mm <= 12 && a >= 1900 && a <= anoMax) out.push({ iso: `${m[3]}-${m[2]}-${m[1]}`, a, pos: m.index });
     }
     return out;
   }
@@ -125,6 +127,15 @@
     return '';
   }
 
+  // RG no formato 1.234.567 / 12.345.678-9 mesmo sem o rótulo "REGISTRO GERAL"
+  function rgSemRotulo(txt) {
+    const t = numerizar(txt);
+    for (const m of t.matchAll(/(?<![\d.])(\d{1,2}\.\d{3}\.\d{3}(?:-[\dX])?)(?![\d.])/g)) {
+      if (!cpfOk(m[1].replace(/\D/g, ''))) return m[1];
+    }
+    return '';
+  }
+
   // Lê o texto inteiro e devolve o que conseguir reconhecer
   function extrair(txt) {
     const ls = linhas(txt);
@@ -135,7 +146,16 @@
       const cands = ls.filter(pareceNome).map(limparNome);
       nome = cands.sort((a, b) => b.length - a.length)[0] || '';
     }
-    const fil = depoisDoRotulo(ls, /FILIA/, 2).filter((x) => x !== nome);
+    let fil = depoisDoRotulo(ls, /FILIA/, 2).filter((x) => x !== nome);
+    if (!fil.length && nome && tipo !== 'CPF') {
+      // sem o rótulo "FILIAÇÃO": as linhas com cara de nome logo depois do nome costumam ser pai e mãe
+      const i = ls.findIndex((l) => pareceNome(l) && limparNome(l) === nome);
+      if (i >= 0) {
+        const seguintes = [];
+        for (let j = i + 1; j < Math.min(ls.length, i + 6) && seguintes.length < 2; j++) if (pareceNome(ls[j])) seguintes.push(limparNome(ls[j]));
+        fil = seguintes;
+      }
+    }
     const cpf = acharCpf(txt), nasc = acharNasc(txt);
     // nome "adivinhado" sem rótulo, sem CPF e sem data costuma ser sujeira da leitura
     if (!porRotulo && !cpf && !nasc) nome = '';
@@ -144,7 +164,7 @@
       nome: nome ? titulo(nome) : '',
       cpf,
       nasc,
-      rg: tipo === 'CPF' ? '' : acharRg(txt),
+      rg: tipo === 'CPF' ? '' : (acharRg(txt) || rgSemRotulo(txt)),
       pai: fil.length === 2 ? titulo(fil[0]) : '',
       mae: fil.length ? titulo(fil[fil.length - 1]) : '',
       filiacao: fil.map(titulo).join(' e ')
@@ -235,5 +255,133 @@
     } finally { worker.terminate(); }
   }
 
-  window.LeitorDoc = { ler, extrair, cpfOk, fotoCopia };
+
+  // ---------------------------------------------------------------- câmera ao vivo
+  // Abre a câmera dentro do app, com moldura no formato do documento.
+  // Captura sozinha quando a imagem fica parada e nítida (ou no toque do botão).
+  // Devolve um Blob só com o recorte da moldura, ou null se cancelar. Nada é salvo na galeria.
+  const temCamera = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && window.isSecureContext;
+
+  function escolherDaGaleria() {
+    return new Promise((ok) => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+      document.body.appendChild(inp);
+      inp.addEventListener('change', () => { const f = inp.files && inp.files[0]; inp.remove(); ok(f || null); });
+      inp.click();
+    });
+  }
+
+  function abrirCamera() {
+    return new Promise(async (resolver) => {
+      const tela = document.createElement('div');
+      tela.className = 'cam-tela';
+      tela.innerHTML = `
+        <video class="cam-video" playsinline muted autoplay></video>
+        <div class="cam-moldura"><span></span><span></span><span></span><span></span></div>
+        <div class="cam-topo"><button type="button" class="cam-btn" data-c="fechar" aria-label="Fechar">✕</button>
+          <div class="cam-dica" id="camDica">Abrindo a câmera…</div>
+          <button type="button" class="cam-btn" data-c="luz" aria-label="Lanterna" hidden>🔦</button></div>
+        <div class="cam-base">
+          <button type="button" class="cam-txt" data-c="galeria">Galeria</button>
+          <button type="button" class="cam-disparo" data-c="ler" aria-label="Ler agora"><span></span></button>
+          <label class="cam-txt cam-auto"><input type="checkbox" id="camAuto" checked> Automático</label>
+        </div>`;
+      document.body.appendChild(tela); document.body.classList.add('com-camera');
+      const video = tela.querySelector('video'), dica = tela.querySelector('#camDica'), moldura = tela.querySelector('.cam-moldura');
+      // celular em pé: o documento também fica em pé na moldura (aproveita a altura da tela = mais resolução)
+      const emPe = () => window.innerHeight > window.innerWidth;
+      const ajustarMoldura = () => moldura.classList.toggle('vertical', emPe());
+      ajustarMoldura(); window.addEventListener('resize', ajustarMoldura);
+      const msgPadrao = () => emPe() ? 'Vire o documento de lado e encaixe na moldura' : 'Encaixe o documento na moldura e segure firme';
+      let stream = null, timer = null, acabou = false, luz = false;
+      const fim = (valor) => {
+        if (acabou) return; acabou = true;
+        clearInterval(timer);
+        if (stream) stream.getTracks().forEach((t) => t.stop());
+        window.removeEventListener('resize', ajustarMoldura);
+        tela.remove(); document.body.classList.remove('com-camera');
+        resolver(valor);
+      };
+
+      // recorta a área da moldura no tamanho real do vídeo
+      const recortar = (larguraAlvo) => {
+        const vw = video.videoWidth, vh = video.videoHeight; if (!vw) return null;
+        const tv = video.getBoundingClientRect(), tm = moldura.getBoundingClientRect();
+        const k = Math.max(tv.width / vw, tv.height / vh);           // object-fit: cover
+        const ox = (tv.width - vw * k) / 2, oy = (tv.height - vh * k) / 2;
+        const folga = 0.04;
+        let x = (tm.left - tv.left - ox) / k, y = (tm.top - tv.top - oy) / k, w = tm.width / k, h = tm.height / k;
+        x -= w * folga; y -= h * folga; w *= 1 + 2 * folga; h *= 1 + 2 * folga;
+        x = Math.max(0, x); y = Math.max(0, y); w = Math.min(vw - x, w); h = Math.min(vh - y, h);
+        const e = larguraAlvo ? larguraAlvo / w : 1;
+        const cv = document.createElement('canvas'); cv.width = Math.round(w * e); cv.height = Math.round(h * e);
+        cv.getContext('2d', { willReadFrequently: true }).drawImage(video, x, y, w, h, 0, 0, cv.width, cv.height);
+        return cv;
+      };
+      const capturar = () => {
+        let cv = recortar(0); if (!cv) return;
+        if (moldura.classList.contains('vertical')) {           // deixa o documento deitado para a leitura
+          const r = document.createElement('canvas'); r.width = cv.height; r.height = cv.width;
+          const c = r.getContext('2d'); c.translate(r.width / 2, r.height / 2); c.rotate(Math.PI / 2); c.drawImage(cv, -cv.width / 2, -cv.height / 2);
+          cv = r;
+        }
+        if (navigator.vibrate) try { navigator.vibrate(60); } catch (e) {}
+        dica.textContent = 'Pronto!';
+        cv.toBlob((b) => fim(b), 'image/jpeg', 0.92);
+      };
+
+      tela.addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-c]'); if (!b) return;
+        const c = b.dataset.c;
+        if (c === 'fechar') fim(null);
+        else if (c === 'ler') capturar();
+        else if (c === 'galeria') { const f = await escolherDaGaleria(); if (f) fim(f); }
+        else if (c === 'luz' && stream) {
+          luz = !luz;
+          try { await stream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: luz }] }); b.classList.toggle('on', luz); } catch (er) {}
+        }
+      });
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } } });
+      } catch (e) {
+        dica.textContent = 'Não consegui abrir a câmera. Permita o acesso à câmera para este site, ou use a Galeria.';
+        return;
+      }
+      if (acabou) { stream.getTracks().forEach((t) => t.stop()); return; }
+      video.srcObject = stream;
+      try { await video.play(); } catch (e) {}
+      const trilha = stream.getVideoTracks()[0];
+      try {
+        const cap = trilha.getCapabilities ? trilha.getCapabilities() : {};
+        if (cap.torch) tela.querySelector('[data-c="luz"]').hidden = false;
+        if (cap.focusMode && cap.focusMode.includes('continuous')) trilha.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+      } catch (e) {}
+      dica.textContent = msgPadrao();
+
+      // captura automática: imagem parada + nítida por ~1 segundo
+      let anterior = null, parado = 0, melhorNitidez = 0; const inicio = Date.now();
+      timer = setInterval(() => {
+        if (acabou || !$auto()) return;
+        const cv = recortar(160);
+        if (!cv) return;
+        const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        const n = cv.width * cv.height, g = new Float32Array(n);
+        for (let i = 0; i < n; i++) g[i] = d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114;
+        let dif = 0, nit = 0;
+        for (let i = 1; i < n; i++) { nit += Math.abs(g[i] - g[i - 1]); if (anterior) dif += Math.abs(g[i] - anterior[i]); }
+        dif /= n; nit /= n; anterior = g;
+        melhorNitidez = Math.max(melhorNitidez * 0.98, nit);
+        const nitido = nit >= melhorNitidez * 0.8 && nit > 2.5;
+        if (dif < 4 && nitido) parado++; else parado = 0;
+        moldura.classList.toggle('firme', parado >= 1);
+        dica.textContent = parado >= 1 ? 'Segure assim…' : (nit <= 2.5 ? 'Aproxime o documento da câmera' : msgPadrao());
+        if (parado >= 5 && Date.now() - inicio > 1800) capturar();
+      }, 250);
+      const $auto = () => tela.querySelector('#camAuto').checked;
+    });
+  }
+
+  window.LeitorDoc = { ler, extrair, cpfOk, fotoCopia, abrirCamera, temCamera, escolherDaGaleria };
 })();

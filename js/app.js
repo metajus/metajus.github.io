@@ -851,11 +851,7 @@
   // aoConfirmar(pessoa, valores) é chamado só quando o servidor toca em "Preencher".
   function lerDocumentoPorFoto(m, aoConfirmar) {
     const pessoas = pessoasDoModelo(m);
-    const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
-    document.body.appendChild(inp);
-    inp.addEventListener('change', async () => {
-      const arq = inp.files && inp.files[0]; inp.remove();
+    const processar = async (arq) => {
       if (!arq) return;
       const fundo = document.createElement('div');
       fundo.className = 'painel-fundo';
@@ -921,8 +917,10 @@
         aoConfirmar(p, { nome: v('ldNome'), cpf: v('ldCpf'), rg: v('ldRg'), nasc: v('ldNasc'), mae, filiacao: [pai, mae].filter(Boolean).join(' e ') }, c);
         fechar();
       });
-    });
-    inp.click();
+    };
+    // câmera ao vivo dentro do app; se o aparelho não tiver (ou o site não tiver permissão), vai pela galeria
+    if (LeitorDoc.temCamera()) LeitorDoc.abrirCamera().then(processar);
+    else LeitorDoc.escolherDaGaleria().then(processar);
   }
 
   function telaAtendimentoDoc(id) {
@@ -966,7 +964,8 @@
             <div class="cartao atd-form" id="atdForm">
               <div class="cartao-cab"><h3 class="atd-passo"><span class="num">1</span> Dados da pessoa</h3></div>
               <p class="dica">${esc(m.desc)}</p>
-              ${pessoasDoModelo(m).length ? `<button type="button" class="btn secundario atd-foto" id="atdFoto">${ic('camera')} Preencher com foto do documento <small>RG, CNH ou CPF</small></button>` : ''}
+              ${pessoasDoModelo(m).length ? `<button type="button" class="btn secundario atd-foto" id="atdFoto">${ic('camera')} Ler documento com a câmera <small>RG, CNH ou CPF</small></button>
+              <p class="atd-dica-teclado">Se a leitura errar, use o teclado do celular: toque no campo e escolha <b>Escanear Texto</b> (iPhone) ou o ícone de <b>câmera/Lens</b> do teclado (Android, teclado Gboard) e aponte para o documento.</p>` : ''}
               <div id="atdCopias"></div>
               <div id="atdCampos"></div>
             </div>
@@ -1062,10 +1061,10 @@
       const i = +b.dataset.i;
       if (b.dataset.cp === 'tirar') { copias.splice(i, 1); desenharCopia(); return; }
       if (b.dataset.cp === 'girar') { copias[i] = await LeitorDoc.fotoCopia(copias[i].src, 90); desenharCopia(); return; }
-      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
-      document.body.appendChild(inp);
-      inp.addEventListener('change', async () => { const f = inp.files && inp.files[0]; inp.remove(); if (!f) return; copias.push(await LeitorDoc.fotoCopia(f, 0)); desenharCopia(); UI.toast('Foto adicionada à cópia. Se ficou de lado, toque em ↻.', 'ok'); });
-      inp.click();
+      const f = LeitorDoc.temCamera() ? await LeitorDoc.abrirCamera() : await LeitorDoc.escolherDaGaleria();
+      if (!f) return;
+      copias.push(await LeitorDoc.fotoCopia(f, 0)); desenharCopia();
+      UI.toast('Foto adicionada à cópia. Se ficou de lado, toque em ↻.', 'ok');
     });
     if ($('#atdFoto')) $('#atdFoto').addEventListener('click', () => lerDocumentoPorFoto(m, (p, val, copia) => {
       if (copia && copias.length < 3) { copias.push(copia); desenharCopia(); }
