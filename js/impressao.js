@@ -38,7 +38,7 @@
 
   const cabecalho = () => `
     <div class="fl-cab">
-      <img class="fl-logo" src="icons/tjal-logo.png" alt="">
+      <img class="fl-logo" src="icons/pj-al-logo.png" alt="">
       <div class="fl-c1">${CAB.l1}</div>
       <div class="fl-c1">${CAB.l2}</div>
       <div class="fl-c2">${CAB.l3}</div>
@@ -127,7 +127,7 @@
   function tabela({ titulo, sub, colunas, linhas, nota, por }) {
     const quando = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
     return `<div class="folha-lista">
-      <div class="fll-cab"><img src="icons/tjal-logo.png" alt=""><div><b>PODER JUDICIÁRIO DO ESTADO DE ALAGOAS</b><br>Juízo de Direito da Comarca de Santa Luzia do Norte</div></div>
+      <div class="fll-cab"><img src="icons/pj-al-logo.png" alt=""><div><b>PODER JUDICIÁRIO DO ESTADO DE ALAGOAS</b><br>Juízo de Direito da Comarca de Santa Luzia do Norte</div></div>
       <h1>${esc(titulo)}</h1>
       ${sub ? `<div class="fll-sub">${esc(sub)}</div>` : ''}
       <table><thead><tr><th class="n">#</th>${colunas.map((c) => `<th${c.num ? ' class="num"' : ''}>${esc(c.rot || c)}</th>`).join('')}</tr></thead>
