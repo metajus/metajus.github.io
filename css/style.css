@@ -610,7 +610,7 @@ svg.graf.rosca .r-sub { fill: var(--suave); font-size: 9.5px; font-weight: 600; 
   font-family: 'Times New Roman', Times, 'Liberation Serif', 'Nimbus Roman', serif; font-size: 12pt; line-height: 1.2; overflow: hidden;
   -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .folha * { box-sizing: border-box; }
-.fl-marca { position: absolute; width: 126mm; height: 120mm; left: 50%; top: 148.5mm; transform: translate(-50%, -50%); z-index: 0; pointer-events: none; }
+.fl-marca { position: absolute; width: 123mm; height: 123mm; left: 50%; top: 148.5mm; transform: translate(-50%, -50%); z-index: 0; pointer-events: none; }
 .fl-corpo { position: relative; z-index: 1; padding-bottom: 36mm; }
 .fl-cab { text-align: center; }
 .fl-logo { width: auto; height: 24mm; display: block; margin: 0 auto 6pt; }
