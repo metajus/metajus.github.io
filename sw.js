@@ -1,7 +1,7 @@
 // Service Worker do MetaJus — guarda só a "casca" do app (telas, estilos, scripts).
 // Dados de processos NUNCA são guardados em cache: vêm sempre do banco.
 // Ao publicar uma nova versão, aumente o número abaixo para os celulares atualizarem.
-const VERSAO = 'metajus-v15';
+const VERSAO = 'metajus-v16';
 
 const ARQUIVOS = [
   './',
@@ -20,7 +20,7 @@ const ARQUIVOS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/pj-al-logo.png',
-  './icons/marca-dagua.jpg'
+  './icons/marca-dagua-pj.jpg'
 ];
 
 const BIBLIOTECAS = [
