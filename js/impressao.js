@@ -98,6 +98,31 @@
       <div class="fl-corpo">${cabecalho()}${miolo}</div>${rodape()}</div>`;
   }
 
+  // Folha timbrada com a cópia do(s) documento(s) fotografado(s) no balcão
+  function copiaDocumento(fotos, { documento: nomeDoc, assinante, dataISO } = {}) {
+    if (!fotos || !fotos.length) return '';
+    // Espaço útil da folha para as fotos: ~140 mm de altura x 150 mm de largura
+    const n = fotos.length;
+    const empe = fotos.every((f) => f.h > f.w);
+    const lado = empe && n === 2;                    // duas fotos em pé: lado a lado
+    const hMax = lado ? 135 : n === 1 ? 140 : n === 2 ? 66 : 42;
+    const wMax = lado ? 72 : 150;
+    const imgs = fotos.map((f) => {
+      const larg = Math.min(wMax, hMax * f.w / f.h);
+      return `<img class="fl-cp-img" src="${f.src}" style="width:${larg.toFixed(1)}mm" alt="Cópia do documento">`;
+    }).join('');
+    const a = assinante || {};
+    return `<div class="folha fl-copia"><img class="fl-marca" src="icons/marca-dagua.jpg" alt="">
+      <div class="fl-corpo">${cabecalho()}
+        <h1 class="fl-cp-tit">CÓPIA DE DOCUMENTO</h1>
+        <div class="fl-cp-sub">Documento apresentado no balcão de atendimento${nomeDoc ? ` — anexo: ${esc(nomeDoc)}` : ''}</div>
+        <div class="fl-cp-fotos${lado ? ' lado' : ''}">${imgs}</div>
+        <p class="fl-cp-txt">Cópia extraída do documento original apresentado nesta data.</p>
+        <p class="fl-cp-txt">Santa Luzia do Norte/AL, ${dataExtenso(dataISO)}.</p>
+        ${a.nome ? `<div class="fl-cp-ass"><div class="fl-nome">${esc(a.nome)}</div><div class="fl-cargo">${esc(a.cargo || '')}</div></div>` : ''}
+      </div>${rodape()}</div>`;
+  }
+
   // Lista/planilha em papel (cabeçalho compacto, tabela com cabeçalho repetido em cada página)
   function tabela({ titulo, sub, colunas, linhas, nota, por }) {
     const quando = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
@@ -140,5 +165,5 @@
     });
   }
 
-  window.Impressao = { documento, tabela, imprimir, dataExtenso, hojeISO, CAB, ROD };
+  window.Impressao = { documento, copiaDocumento, tabela, imprimir, dataExtenso, hojeISO, CAB, ROD };
 })();

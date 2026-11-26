@@ -829,6 +829,102 @@
     desenhar();
   }
 
+  // ----- Foto do documento → preenche os dados (leitura no próprio aparelho; a foto não é guardada) -----
+  const PESSOAS_DOC = [
+    { rot: 'Pessoa', nome: 'nome', cpf: 'cpf', nasc: 'nasc', mae: 'mae' },
+    { rot: 'Requerente', nome: 'requerente', cpf: 'reqCpf', rg: 'reqRg' },
+    { rot: 'Beneficiário(a)', nome: 'beneficiario', cpf: 'benCpf', ativar: 'temBen' },
+    { rot: 'Advogado(a)', nome: 'adv' },
+    { rot: 'Quem recebe o equipamento', nome: 'recebedor' },
+    { rot: 'Entregador(a)', nome: 'eNome', cpf: 'eCpf', rg: 'eRg' },
+    { rot: 'Menor', nome: 'mNome', cpf: 'mCpf', nasc: 'mNasc', filiacao: 'mPais' },
+    { rot: 'Recebedor(a)', nome: 'rNome', cpf: 'rCpf', rg: 'rRg' }
+  ];
+  const pessoasDoModelo = (m) => {
+    const tem = (id) => id && m.campos.some((c) => c.id === id);
+    return PESSOAS_DOC.filter((p) => m.campos.some((c) => c.id === p.nome && c.tipo === 'nome'))
+      .map((p) => ({ ...p, cpf: tem(p.cpf) && p.cpf, nasc: tem(p.nasc) && p.nasc, mae: tem(p.mae) && p.mae, rg: tem(p.rg) && p.rg, filiacao: tem(p.filiacao) && p.filiacao,
+        doc: p.nome === 'nome' && tem('docTipo') && tem('docNum') }));
+  };
+
+  // Abre a câmera/galeria, lê o documento e mostra o resultado para o servidor conferir.
+  // aoConfirmar(pessoa, valores) é chamado só quando o servidor toca em "Preencher".
+  function lerDocumentoPorFoto(m, aoConfirmar) {
+    const pessoas = pessoasDoModelo(m);
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', async () => {
+      const arq = inp.files && inp.files[0]; inp.remove();
+      if (!arq) return;
+      const fundo = document.createElement('div');
+      fundo.className = 'painel-fundo';
+      fundo.innerHTML = `<div class="painel" role="dialog" aria-modal="true" aria-label="Ler documento">
+        <div class="painel-cab"><h3>${ic('camera')} Ler documento</h3><button class="topo-btn" data-p="fechar" aria-label="Fechar">✕</button></div>
+        <div class="painel-corpo" id="ldCorpo">
+          <p class="dica" id="ldFase">Preparando…</p>
+          <div class="ld-barra"><span id="ldBarra"></span></div>
+          <p class="atd-lgpd">${ic('cadeado')} <span>A foto é lida aqui mesmo no aparelho. Ela não é enviada nem guardada.</span></p>
+        </div></div>`;
+      document.body.appendChild(fundo); document.body.classList.add('com-painel');
+      let aberto = true;
+      const fechar = () => { aberto = false; fundo.remove(); document.body.classList.remove('com-painel'); };
+      fundo.addEventListener('click', (e) => { if (e.target === fundo || e.target.closest('[data-p="fechar"]')) fechar(); });
+      let r, copia = null;
+      const pegarCopia = async () => { if (!copia) copia = await LeitorDoc.fotoCopia(arq, (r && r.giro) || 0); return copia; };
+      try {
+        r = await LeitorDoc.ler(arq, (txt, p) => { if (!aberto) return; $('#ldFase', fundo).textContent = txt; $('#ldBarra', fundo).style.width = Math.round(p * 100) + '%'; });
+      } catch (e) {
+        if (!aberto) return;
+        $('#ldCorpo', fundo).innerHTML = `<p class="dica">Não foi possível abrir o leitor: ${esc(e.message || e)}</p><p class="dica">Confira a internet (na primeira vez o leitor precisa ser baixado) e tente de novo.</p>`;
+        return;
+      }
+      if (!aberto) return;
+      const achou = r && (r.nome || r.cpf);
+      if (!achou) {
+        $('#ldCorpo', fundo).innerHTML = `<p><b>Não consegui ler os dados desta foto.</b></p>
+          <ul class="ld-dicas"><li>Tire o documento do plástico e apoie numa mesa.</li><li>Use boa luz, sem reflexo nem sombra.</li>
+          <li>Chegue perto: o documento deve ocupar quase toda a foto, reto e em foco.</li><li>Na CNH e no RG, fotografe o lado onde estão nome e CPF.</li></ul>
+          <div class="painel-pe" style="padding:0;border:0;flex-wrap:wrap"><button class="btn secundario" data-p="soCopia">Usar só como cópia para imprimir</button><button class="btn primario" data-p="outra">${ic('camera')} Tentar outra foto</button></div>`;
+        $('[data-p="outra"]', fundo).addEventListener('click', () => { fechar(); lerDocumentoPorFoto(m, aoConfirmar); });
+        $('[data-p="soCopia"]', fundo).addEventListener('click', async () => { const c = await pegarCopia(); fechar(); aoConfirmar(null, null, c); });
+        return;
+      }
+      const temRg = pessoas.some((p) => p.rg || p.doc), temNasc = pessoas.some((p) => p.nasc), temMae = pessoas.some((p) => p.mae || p.filiacao);
+      const campo = (id, rot, v, extra) => `<div class="campo"><label for="${id}">${rot}</label><input id="${id}" value="${esc(v || '')}" ${extra || ''}></div>`;
+      $('#ldCorpo', fundo).innerHTML = `
+        <p class="dica">Confira com o documento e corrija o que precisar. <b>A leitura automática pode errar.</b></p>
+        ${pessoas.length > 1 ? `<div class="campo"><label for="ldPessoa">Preencher os dados de</label><select id="ldPessoa">${pessoas.map((p, i) => `<option value="${i}">${esc(p.rot)}</option>`).join('')}</select></div>` : ''}
+        ${campo('ldNome', 'Nome', r.nome, 'autocapitalize="words"')}
+        ${pessoas.some((p) => p.cpf || p.doc) ? campo('ldCpf', 'CPF', r.cpf, 'inputmode="numeric"') : ''}
+        ${temRg ? campo('ldRg', 'RG', r.rg) : ''}
+        ${temNasc ? `<div class="campo"><label for="ldNasc">Data de nascimento</label><input type="date" id="ldNasc" value="${esc(r.nasc || '')}"></div>` : ''}
+        ${temMae ? campo('ldMae', 'Mãe', r.mae, 'autocapitalize="words"') + campo('ldPai', 'Pai', r.pai, 'autocapitalize="words"') : ''}
+        <label class="ld-copia"><input type="checkbox" id="ldCopia"><span><b>Imprimir também a cópia deste documento?</b><small>Sai numa folha a mais, com o timbre do Fórum, para ficar no Fórum ou anexar no sistema.</small></span></label>
+        <p class="atd-lgpd">${ic('cadeado')} <span>A foto não é enviada nem guardada. Se pedir a cópia, ela fica só nesta tela até você sair.</span></p>`;
+      const pe = document.createElement('div');
+      pe.className = 'painel-pe';
+      pe.innerHTML = `<button class="btn secundario" data-p="outra">${ic('camera')} Outra foto</button><button class="btn primario" data-p="ok">${ic('check')} Preencher</button>`;
+      $('.painel', fundo).appendChild(pe);
+      const cpfIn = $('#ldCpf', fundo);
+      if (cpfIn) {
+        const av = () => { const ok = !cpfIn.value || cpfValido(cpfIn.value); cpfIn.closest('.campo').classList.toggle('erro', !ok); };
+        cpfIn.addEventListener('input', () => { cpfIn.value = MASCARA.cpf(cpfIn.value); av(); }); av();
+      }
+      $('[data-p="outra"]', pe).addEventListener('click', () => { fechar(); lerDocumentoPorFoto(m, aoConfirmar); });
+      $('[data-p="ok"]', pe).addEventListener('click', async () => {
+        const p = pessoas[$('#ldPessoa', fundo) ? +$('#ldPessoa', fundo).value : 0];
+        const v = (id) => { const el = $('#' + id, fundo); return el ? el.value.trim() : ''; };
+        const mae = v('ldMae'), pai = v('ldPai');
+        const querCopia = $('#ldCopia', fundo).checked;
+        const c = querCopia ? await pegarCopia() : null;
+        aoConfirmar(p, { nome: v('ldNome'), cpf: v('ldCpf'), rg: v('ldRg'), nasc: v('ldNasc'), mae, filiacao: [pai, mae].filter(Boolean).join(' e ') }, c);
+        fechar();
+      });
+    });
+    inp.click();
+  }
+
   function telaAtendimentoDoc(id) {
     const m = MODELOS.find((x) => x.id === id);
     if (!m) { location.hash = '#/atendimentos'; return; }
@@ -870,6 +966,8 @@
             <div class="cartao atd-form" id="atdForm">
               <div class="cartao-cab"><h3 class="atd-passo"><span class="num">1</span> Dados da pessoa</h3></div>
               <p class="dica">${esc(m.desc)}</p>
+              ${pessoasDoModelo(m).length ? `<button type="button" class="btn secundario atd-foto" id="atdFoto">${ic('camera')} Preencher com foto do documento <small>RG, CNH ou CPF</small></button>` : ''}
+              <div id="atdCopias"></div>
               <div id="atdCampos"></div>
             </div>
             <div class="cartao atd-form">
@@ -885,7 +983,7 @@
               <button class="btn mini" id="atdEditar">${ic('editar')} Ajustar texto</button>
             </div>
             <p class="dica" id="atdDicaEdit">Os campos em <mark style="background:#fff1a8;color:#6b4e00;padding:0 3px;border-radius:3px">amarelo</mark> ainda faltam preencher.</p>
-            <div class="atd-previa" id="atdPrevia"><div class="escala" id="atdEscala"></div></div>
+            <div class="atd-previa" id="atdPrevia"><div class="escala" id="atdEscala"><div id="atdDocF"></div><div id="atdCopiaF"></div></div></div>
             <div class="atd-acoes">
               <button class="btn primario" id="atdImprimir">${ic('imprimir')} Imprimir</button>
               <button class="btn secundario" id="atdLimpar">Limpar e fazer outro</button>
@@ -901,20 +999,31 @@
       $('#atdCampos').innerHTML = camposVisiveis().map(campoHTML).join('');
       if (foco && $(`#atdCampos [name="${foco}"]`)) $(`#atdCampos [name="${foco}"]`).focus();
     };
+    const copias = []; // fotos para a folha de cópia (só na memória desta tela)
     const ajustarEscala = () => {
-      const caixa = $('#atdPrevia'), alvo = $('#atdEscala'); if (!caixa || !alvo.firstElementChild) return;
-      const folha = alvo.firstElementChild;
-      const larg = caixa.clientWidth - 20, esc1 = Math.min(1, larg / folha.offsetWidth);
+      const caixa = $('#atdPrevia'), alvo = $('#atdEscala'); if (!caixa || !alvo) return;
+      const folhas = $$('.folha', alvo); if (!folhas.length) return;
+      const larg = caixa.clientWidth - 20, esc1 = Math.min(1, larg / folhas[0].offsetWidth);
+      const alt = folhas.reduce((t, f) => t + f.offsetHeight, 0) + (folhas.length - 1) * 16;
       alvo.style.transform = `scale(${esc1})`;
-      alvo.style.height = (folha.offsetHeight * esc1) + 'px';
-      alvo.style.width = (folha.offsetWidth * esc1) + 'px';
+      alvo.style.height = (alt * esc1) + 'px';
+      alvo.style.width = (folhas[0].offsetWidth * esc1) + 'px';
+    };
+    const aposDesenhar = () => { requestAnimationFrame(ajustarEscala); $$('#atdEscala img').forEach((i) => { if (!i.complete) i.onload = ajustarEscala; }); };
+    const desenharCopia = () => {
+      $('#atdCopiaF').innerHTML = Impressao.copiaDocumento(copias, { documento: m.titulo.split(' — ')[0], assinante: ass, dataISO: dataDoc });
+      $('#atdCopias').innerHTML = copias.length ? `
+        <div class="atd-copias"><div class="atd-copias-tit">${ic('camera')} Cópia do documento para imprimir (folha extra)</div>
+          <div class="atd-copias-lista">${copias.map((c, i) => `<div class="atd-copia"><img src="${c.src}" alt=""><div>
+            <button type="button" class="btn mini" data-cp="girar" data-i="${i}" title="Girar">↻</button>
+            <button type="button" class="btn mini" data-cp="tirar" data-i="${i}" title="Tirar da impressão">✕</button></div></div>`).join('')}</div>
+          ${copias.length < 3 ? `<button type="button" class="btn mini" data-cp="mais">+ Adicionar foto do verso</button>` : ''}</div>` : '';
+      aposDesenhar();
     };
     const desenharFolha = () => {
       if (modo !== 'auto') return;
-      $('#atdEscala').innerHTML = Impressao.documento(m, dados, ass, dataDoc);
-      $('#atdEscala').style.height = '';
-      requestAnimationFrame(ajustarEscala);
-      $$('#atdEscala img').forEach((i) => { if (!i.complete) i.onload = ajustarEscala; });
+      $('#atdDocF').innerHTML = Impressao.documento(m, dados, ass, dataDoc);
+      aposDesenhar();
     };
     desenharCampos(); desenharFolha();
     window.addEventListener('resize', ajustarEscala);
@@ -945,20 +1054,49 @@
       b.closest('.campo').classList.remove('erro');
       atualizar(id, b.dataset.op, true);
     });
-    $('#aNome').addEventListener('input', (e) => { ass.nome = e.target.value; desenharFolha(); });
+    $('#aNome').addEventListener('input', (e) => { ass.nome = e.target.value; desenharFolha(); if (copias.length) desenharCopia(); });
     $('#aCargo').addEventListener('change', (e) => { ass.cargo = e.target.value; try { localStorage.setItem('mj_cargo', ass.cargo); } catch (_) {} desenharFolha(); });
-    $('#aData').addEventListener('change', (e) => { dataDoc = e.target.value || Impressao.hojeISO(); desenharFolha(); });
+    $('#aData').addEventListener('change', (e) => { dataDoc = e.target.value || Impressao.hojeISO(); desenharFolha(); if (copias.length) desenharCopia(); });
+    $('#atdCopias').addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-cp]'); if (!b) return;
+      const i = +b.dataset.i;
+      if (b.dataset.cp === 'tirar') { copias.splice(i, 1); desenharCopia(); return; }
+      if (b.dataset.cp === 'girar') { copias[i] = await LeitorDoc.fotoCopia(copias[i].src, 90); desenharCopia(); return; }
+      const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.style.display = 'none';
+      document.body.appendChild(inp);
+      inp.addEventListener('change', async () => { const f = inp.files && inp.files[0]; inp.remove(); if (!f) return; copias.push(await LeitorDoc.fotoCopia(f, 0)); desenharCopia(); UI.toast('Foto adicionada à cópia. Se ficou de lado, toque em ↻.', 'ok'); });
+      inp.click();
+    });
+    if ($('#atdFoto')) $('#atdFoto').addEventListener('click', () => lerDocumentoPorFoto(m, (p, val, copia) => {
+      if (copia && copias.length < 3) { copias.push(copia); desenharCopia(); }
+      if (!p) { UI.toast('A cópia do documento vai sair numa folha a mais. Preencha os dados à mão.', 'ok'); return; }
+      const por = (id, valor) => { if (id && valor) dados[id] = valor; };
+      if (p.ativar) dados[p.ativar] = true;
+      por(p.nome, val.nome);
+      por(p.cpf, val.cpf && MASCARA.cpf(val.cpf));
+      por(p.rg, val.rg);
+      por(p.nasc, val.nasc);
+      por(p.mae, val.mae);
+      por(p.filiacao, val.filiacao);
+      if (p.doc) {
+        if (val.cpf) { dados.docTipo = 'CPF'; dados.docNum = MASCARA.cpf(val.cpf); }
+        else if (val.rg) { dados.docTipo = 'RG'; dados.docNum = val.rg; }
+      }
+      desenharCampos(); desenharFolha();
+      $$('#atdCampos .campo').forEach((x) => x.classList.remove('erro'));
+      UI.toast(modo === 'auto' ? 'Dados preenchidos. Confira com o documento.' : 'Dados preenchidos no formulário. Toque em "Desfazer ajustes" para vê-los na folha.', 'ok');
+    }));
 
     // modo: 'auto' (folha segue o formulário) | 'editando' | 'ajustado' (ajustes à mão, folha congelada)
     $('#atdEditar').addEventListener('click', () => {
       const btn = $('#atdEditar');
       if (modo !== 'editando') {
         modo = 'editando';
-        $$('#atdEscala .fl-p, #atdEscala .fl-tit, #atdEscala .fl-sub, #atdEscala .fl-data, #atdEscala .fl-nome, #atdEscala .fl-cargo, #atdEscala .fl-of-dest, #atdEscala .fl-of-ass, #atdEscala .fl-of-voc, #atdEscala .fl-of-num').forEach((p) => p.setAttribute('contenteditable', 'true'));
+        $$('#atdDocF .fl-p, #atdDocF .fl-tit, #atdDocF .fl-sub, #atdDocF .fl-data, #atdDocF .fl-nome, #atdDocF .fl-cargo, #atdDocF .fl-of-dest, #atdDocF .fl-of-ass, #atdDocF .fl-of-voc, #atdDocF .fl-of-num').forEach((p) => p.setAttribute('contenteditable', 'true'));
         btn.innerHTML = `${ic('check')} Concluir ajustes`;
         $('#atdDicaEdit').innerHTML = 'Toque no texto da folha para corrigir o que quiser. Enquanto estiver ajustando, mudanças no formulário não aparecem na folha.';
         $('#atdForm').style.opacity = '.55';
-        const p1 = $('#atdEscala .fl-p'); if (p1) p1.focus();
+        const p1 = $('#atdDocF .fl-p'); if (p1) p1.focus();
       } else {
         modo = 'ajustado';
         $$('#atdEscala [contenteditable]').forEach((p) => p.removeAttribute('contenteditable'));
@@ -980,7 +1118,7 @@
         return;
       }
       if (!ass.nome.trim()) { UI.toast('Informe o nome de quem assina.', 'erro'); $('#aNome').focus(); return; }
-      const html = $('#atdEscala').innerHTML;
+      const html = $('#atdDocF').innerHTML + $('#atdCopiaF').innerHTML;
       const nomeArq = (m.titulo.split(' — ')[0] + ' - ' + (dados.nome || dados.requerente || dados.razao || dados.adv || '')).trim().replace(/\s+-\s*$/, '');
       Impressao.imprimir(html, { titulo: nomeArq, tipo: 'doc' });
       if (navigator.standalone) UI.toast('Se a impressão não abrir, toque em Compartilhar › Imprimir.', 'ok');
