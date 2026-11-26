@@ -740,3 +740,29 @@ body.com-painel { overflow: hidden; }
 .pi-modos .opcao small { color: var(--suave); font-size: 12.5px; }
 .pi-modos .opcao input:checked + span { border-color: var(--acento); background: rgba(47, 111, 230, .14); box-shadow: 0 0 0 2px rgba(47, 111, 230, .35) inset; }
 .folha-lista + .folha-lista { break-before: page; page-break-before: always; }
+
+/* Foto do documento (Área de Atendimentos) */
+.atd-foto { width: 100%; justify-content: center; gap: 8px; margin: 4px 0 14px; padding: 13px 14px; border-style: dashed; flex-wrap: wrap; }
+.atd-foto small { color: var(--suave); font-weight: 500; font-size: 12.5px; }
+.ld-barra { height: 10px; border-radius: 99px; background: #0a1426; border: 1px solid var(--borda); overflow: hidden; margin: 8px 0 14px; }
+.ld-barra span { display: block; height: 100%; width: 3%; background: linear-gradient(90deg, var(--acento), #5f95ff); border-radius: 99px; transition: width .3s ease; }
+.ld-dicas { margin: 8px 0 14px 18px; padding: 0; color: var(--suave); line-height: 1.6; font-size: 14px; }
+.ld-copia { display: flex; gap: 10px; align-items: flex-start; padding: 12px; margin: 6px 0 4px; border: 1px solid var(--borda); border-radius: 12px; background: #0a1426; cursor: pointer; }
+.ld-copia input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; }
+.ld-copia span { display: flex; flex-direction: column; gap: 3px; }
+.ld-copia small { color: var(--suave); font-size: 12.5px; line-height: 1.35; }
+.atd-copias { margin: -4px 0 14px; padding: 10px 12px; border: 1px solid var(--borda); border-radius: 12px; background: #0a1426; }
+.atd-copias-tit { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13.5px; margin-bottom: 8px; color: #dbe4f5; }
+.atd-copias-lista { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.atd-copia { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.atd-copia img { width: 112px; height: 76px; object-fit: contain; background: #fff; border-radius: 8px; border: 1px solid var(--borda); }
+.atd-copia > div { display: flex; gap: 6px; }
+/* Folha de cópia do documento */
+#atdCopiaF .folha { margin-top: 16px; }
+.fl-cp-tit { font-family: 'Times New Roman', Times, serif; font-size: 13pt; font-weight: 700; text-align: center; margin: 7mm 0 1.5mm; letter-spacing: .04em; }
+.fl-cp-sub { font-family: 'Times New Roman', Times, serif; font-size: 10.5pt; text-align: center; margin-bottom: 5mm; }
+.fl-cp-fotos { display: flex; flex-direction: column; align-items: center; gap: 5mm; }
+.fl-cp-img { display: block; max-width: 150mm; height: auto; border: 0.3mm solid #999; background: #fff; }
+.fl-cp-txt { font-family: 'Times New Roman', Times, serif; font-size: 11pt; text-align: center; margin: 4mm 0 0; }
+.fl-cp-ass { text-align: center; margin-top: 7mm; font-family: 'Times New Roman', Times, serif; }
+.fl-cp-fotos.lado { flex-direction: row; justify-content: center; align-items: flex-start; }
