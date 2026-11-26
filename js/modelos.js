@@ -295,7 +295,7 @@
       desc: 'Pede às prefeituras a relação de servidores efetivos para o alistamento/sorteio de jurados.',
       campos: [
         { id: 'numero', rot: 'Número do ofício', tipo: 'texto', obr: true, ex: 'Ex.: 163/2026' },
-        { id: 'municipio', rot: 'Município', tipo: 'opcao', ops: ['Santa Luzia do Norte/AL', 'Coqueiro Seco/AL'], obr: true },
+        { id: 'municipio', rot: 'Município', tipo: 'opcao', ops: ['Santa Luzia do Norte/AL', 'Coqueiro Seco/AL', 'Satuba/AL'], obr: true },
         { id: 'magistrado', rot: 'De ordem de', tipo: 'opcao', ops: ['MM. Juíza de Direito', 'MM. Juiz de Direito'], obr: true },
         { id: 'ano', rot: 'Ano das sessões do Júri', tipo: 'numero', obr: true }],
       valores: () => ({ ano: String(new Date().getFullYear() + 1) }),
