@@ -613,7 +613,7 @@ svg.graf.rosca .r-sub { fill: var(--suave); font-size: 9.5px; font-weight: 600; 
 .fl-marca { position: absolute; width: 126mm; height: 120mm; left: 50%; top: 148.5mm; transform: translate(-50%, -50%); z-index: 0; pointer-events: none; }
 .fl-corpo { position: relative; z-index: 1; padding-bottom: 36mm; }
 .fl-cab { text-align: center; }
-.fl-logo { width: 20mm; height: 20mm; display: block; margin: 0 auto 6pt; }
+.fl-logo { width: auto; height: 24mm; display: block; margin: 0 auto 6pt; }
 .fl-c1 { font-size: 13pt; font-weight: 700; line-height: 1.15; margin-bottom: 1pt; }
 .fl-c2 { font-size: 11.5pt; font-weight: 700; line-height: 1.15; margin-bottom: 4pt; }
 .fl-c3 { font-size: 9.5pt; line-height: 1.15; margin-bottom: 28pt; }
@@ -647,7 +647,7 @@ svg.graf.rosca .r-sub { fill: var(--suave); font-size: 9.5px; font-weight: 600; 
 .folha-lista { font-family: Arial, Helvetica, 'Liberation Sans', sans-serif; font-size: 9.5pt; color: #000; background: #fff;
   -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .fll-cab { display: flex; align-items: center; gap: 8px; font-size: 9pt; line-height: 1.3; border-bottom: 1px solid #000; padding-bottom: 5px; }
-.fll-cab img { width: 34px; height: 34px; }
+.fll-cab img { width: auto; height: 42px; }
 .folha-lista h1 { font-size: 14pt; margin: 10px 0 2px; color: #000; }
 .fll-sub { font-size: 9pt; color: #333; margin-bottom: 8px; }
 .folha-lista table { width: 100%; border-collapse: collapse; }
