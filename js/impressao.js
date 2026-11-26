@@ -94,7 +94,7 @@
         ${assinaturasHTML(ass)}
         ${validade ? `<p class="fl-nota">${esc(MODELOS_INFO.NOTA_VALIDADE)}</p>` : ''}`;
     }
-    return `<div class="folha"><img class="fl-marca" src="icons/marca-dagua.jpg" alt="">
+    return `<div class="folha"><img class="fl-marca" src="icons/marca-dagua-pj.jpg" alt="">
       <div class="fl-corpo">${cabecalho()}${miolo}</div>${rodape()}</div>`;
   }
 
@@ -112,7 +112,7 @@
       return `<img class="fl-cp-img" src="${f.src}" style="width:${larg.toFixed(1)}mm" alt="Cópia do documento">`;
     }).join('');
     const a = assinante || {};
-    return `<div class="folha fl-copia"><img class="fl-marca" src="icons/marca-dagua.jpg" alt="">
+    return `<div class="folha fl-copia"><img class="fl-marca" src="icons/marca-dagua-pj.jpg" alt="">
       <div class="fl-corpo">${cabecalho()}
         <h1 class="fl-cp-tit">CÓPIA DE DOCUMENTO</h1>
         <div class="fl-cp-sub">Documento apresentado no balcão de atendimento${nomeDoc ? ` — anexo: ${esc(nomeDoc)}` : ''}</div>
